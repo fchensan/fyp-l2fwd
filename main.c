@@ -92,6 +92,13 @@ static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 static struct rte_eth_conf port_conf = {
 	.rxmode = {
 		.split_hdr_size = 0,
+		.mq_mode = ETH_MQ_RX_RSS,
+	},
+	.rx_adv_conf = {
+		.rss_conf = {
+		.rss_key = NULL,
+			.rss_hf = ETH_RSS_IPV4, //ETH_RSS_PROTO_MASK,
+		}
 	},
 	.txmode = {
 		.mq_mode = ETH_MQ_TX_NONE,
@@ -111,6 +118,23 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 #define MAX_TIMER_PERIOD 86400 /* 1 day max */
 /* A tsc-based timer responsible for triggering statistics printout */
 static uint64_t timer_period = 10; /* default period is 10 seconds */
+
+#define FLOW_NUM 65536
+
+struct pkt_count
+{
+		uint16_t hi_f1;
+		uint16_t hi_f2;
+		uint32_t ctr[3];
+
+	#ifdef IPG
+	uint64_t ipg[2];
+	double avg[2];
+	#endif
+
+} __rte_cache_aligned;
+
+static struct pkt_count pkt_ctr[FLOW_NUM] __rte_cache_aligned;
 
 /* Print out statistics on packets dropped */
 static void
@@ -193,6 +217,74 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 	if (sent)
 		port_statistics[dst_port].tx += sent;
 }
+
+static void
+perform_analytics(struct rte_mbuf *m)
+{
+	uint32_t index_h, index_l;
+
+	index_l = m->hash.rss & 0xffff;
+	index_h = (m->hash.rss & 0xffff0000)>>16;
+
+	#ifdef TIMESTAMP
+	uint64_t timestamp = m->timestamp;
+	RTE_SET_USED(timestamp);
+	#endif
+
+	rte_pktmbuf_free(m);
+	if(pkt_ctr[index_l].hi_f1 == 0)
+	{
+		pkt_ctr[index_l].hi_f1 = index_h;
+		pkt_ctr[index_l].ctr[0]++;
+
+		#ifdef IPG
+		pkt_ctr[index_l].avg[0] = pkt_ctr[index_l].ipg[0];
+		#endif
+	}
+	else if(pkt_ctr[index_l].hi_f2 == 0 && pkt_ctr[index_l].hi_f1 != index_h)
+	{
+		pkt_ctr[index_l].hi_f2 = index_h;
+		pkt_ctr[index_l].ctr[1]++;
+
+		#ifdef IPG
+		pkt_ctr[index_l].avg[1] = pkt_ctr[index_l].ipg[1];
+		#endif
+	}
+	else
+	{
+		if(pkt_ctr[index_l].hi_f1 == index_h)
+		{
+			pkt_ctr[index_l].ctr[0]++;
+
+			#ifdef IPG
+			curr = global - 1 - pkt_ctr[index_l].ipg[0];
+
+			pkt_ctr[index_l].avg[0] =
+				(pkt_ctr[index_l].avg[0] * (pkt_ctr[index_l].ctr[0] - 1) + curr)/pkt_ctr[index_l].ctr[0];
+
+			//if (pkt_ctr[index_l].ctr[0] < 10000 && index_l == 65246)
+			//	printf("%lf %lu %ld\n", pkt_ctr[index_l].avg[0], pkt_ctr[index_l].ctr[0], curr);
+
+			pkt_ctr[index_l].ipg[0] = global;
+			#endif
+		}
+		else if(pkt_ctr[index_l].hi_f2 == index_h)
+		{
+			pkt_ctr[index_l].ctr[1]++;
+
+			#ifdef IPG
+				curr = global - 1 - pkt_ctr[index_l].ipg[1];
+			pkt_ctr[index_l].avg[1] =
+				((pkt_ctr[index_l].avg[1] * (pkt_ctr[index_l].ctr[1] - 1)) + curr)/(float)pkt_ctr[index_l].ctr[1];
+
+			pkt_ctr[index_l].ipg[1] = global;
+			#endif
+		}
+		else
+			pkt_ctr[index_l].ctr[2]++;
+	}
+}
+
 
 /* main processing loop */
 static void
@@ -285,6 +377,9 @@ l2fwd_main_loop(void)
 
 			for (j = 0; j < nb_rx; j++) {
 				m = pkts_burst[j];
+
+				perform_analytics(m);
+
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 				l2fwd_simple_forward(m, portid);
 			}
@@ -623,13 +718,43 @@ check_all_ports_link_status(uint32_t port_mask)
 }
 
 static void
+print_features_extracted()
+{
+	int i, bucket;
+	for(i=0; i< FLOW_NUM; i++)
+	{
+		for (bucket=0; bucket<2; bucket++) {
+			if (pkt_ctr[i].ctr[bucket] > 0) {
+				printf("Flow %d, count: %d \n", i, pkt_ctr[i].ctr[bucket]);
+			}
+		}
+	}
+}
+
+
+// static void
+// print_welcome()
+// {
+// 	printf(	
+// "   _____                      __  _   ____________   ___                __      __  _          \n
+//   / ___/____ ___  ____ ______/ /_/ | / /  _/ ____/  /   |  ____  ____ _/ /_  __/ /_(_)_________\n
+//   \__ \/ __ `__ \/ __ `/ ___/ __/  |/ // // /      / /| | / __ \/ __ `/ / / / / __/ / ___/ ___/\n
+//  ___/ / / / / / / /_/ / /  / /_/ /|  // // /___   / ___ |/ / / / /_/ / / /_/ / /_/ / /__(__  ) \n
+// /____/_/ /_/ /_/\__,_/_/   \__/_/ |_/___/\____/  /_/  |_/_/ /_/\__,_/_/\__, /\__/_/\___/____/  \n
+//                                                                       /____/                   \n")
+// }
+
+static void
 signal_handler(int signum)
 {
+	// print_welcome();
 	if (signum == SIGINT || signum == SIGTERM) {
 		printf("\n\nSignal %d received, preparing to exit...\n",
 				signum);
 		force_quit = true;
 	}
+
+	print_features_extracted();
 }
 
 int
@@ -881,6 +1006,23 @@ main(int argc, char **argv)
 	}
 
 	check_all_ports_link_status(l2fwd_enabled_port_mask);
+
+	uint32_t i;
+	int j;
+
+	for(i=0; i< FLOW_NUM; i++)
+	{
+		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
+		for(j=0; j<=2; j++)
+		{
+			pkt_ctr[i].ctr[j] = 0;
+
+			#ifdef IPG
+			if (j == 2) break;
+			pkt_ctr[i].avg[j] = pkt_ctr[i].ipg[j] = 0;
+			#endif
+		}
+	}
 
 	ret = 0;
 	/* launch per-lcore init on every lcore */
