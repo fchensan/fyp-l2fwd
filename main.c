@@ -123,9 +123,11 @@ static uint64_t timer_period = 10; /* default period is 10 seconds */
 
 struct pkt_count
 {
-		uint16_t hi_f1;
-		uint16_t hi_f2;
-		uint32_t ctr[3];
+	uint16_t hi_f1;
+	uint16_t hi_f2;
+	uint32_t ctr[3];
+
+	uint64_t max_packet_len[2];
 
 	#ifdef IPG
 	uint64_t ipg[2];
@@ -221,6 +223,36 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 static void
 perform_analytics(struct rte_mbuf *m)
 {
+
+	struct rte_ether_hdr *eth_hdr;
+	struct rte_ipv4_hdr *ipv4_hdr;
+	struct rte_ipv6_hdr *ipv6_hdr;
+	struct rte_tcp_hdr *tcp_hdr;
+	struct rte_udp_hdr *udp_hdr;
+	uint64_t l2_len;
+	uint64_t l3_len;
+	uint64_t l4_len;
+	uint64_t packet_len = 0;
+	uint64_t content_len;
+	uint8_t *content;
+	uint16_t src_port;
+	uint16_t dst_port;
+	uint32_t seq;
+	uint32_t ack;
+	char str[64] = {};
+	char hash_value[64] = {};
+	int diff = 0;
+	bool recalc_checksum = false;
+
+	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+	l2_len = sizeof(struct rte_ether_hdr);
+
+	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+		ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+		l3_len = sizeof(struct rte_ipv4_hdr);
+		packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len;
+	}
+
 	uint32_t index_h, index_l;
 
 	index_l = m->hash.rss & 0xffff;
@@ -237,6 +269,8 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].hi_f1 = index_h;
 		pkt_ctr[index_l].ctr[0]++;
 
+		pkt_ctr[index_l].max_packet_len[0] = packet_len;
+
 		#ifdef IPG
 		pkt_ctr[index_l].avg[0] = pkt_ctr[index_l].ipg[0];
 		#endif
@@ -245,6 +279,8 @@ perform_analytics(struct rte_mbuf *m)
 	{
 		pkt_ctr[index_l].hi_f2 = index_h;
 		pkt_ctr[index_l].ctr[1]++;
+
+		pkt_ctr[index_l].max_packet_len[1] = packet_len;
 
 		#ifdef IPG
 		pkt_ctr[index_l].avg[1] = pkt_ctr[index_l].ipg[1];
@@ -255,6 +291,9 @@ perform_analytics(struct rte_mbuf *m)
 		if(pkt_ctr[index_l].hi_f1 == index_h)
 		{
 			pkt_ctr[index_l].ctr[0]++;
+
+			if (pkt_ctr[index_l].max_packet_len[0] < packet_len)
+				pkt_ctr[index_l].max_packet_len[0] = packet_len;
 
 			#ifdef IPG
 			curr = global - 1 - pkt_ctr[index_l].ipg[0];
@@ -271,6 +310,9 @@ perform_analytics(struct rte_mbuf *m)
 		else if(pkt_ctr[index_l].hi_f2 == index_h)
 		{
 			pkt_ctr[index_l].ctr[1]++;
+
+			if (pkt_ctr[index_l].max_packet_len[1] < packet_len)
+				pkt_ctr[index_l].max_packet_len[1] = packet_len;
 
 			#ifdef IPG
 				curr = global - 1 - pkt_ctr[index_l].ipg[1];
@@ -725,7 +767,7 @@ print_features_extracted()
 	{
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d, count: %d \n", i, pkt_ctr[i].ctr[bucket]);
+				printf("Flow %d, count: %d, max packet length: %d\n", i, pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket]);
 			}
 		}
 	}
