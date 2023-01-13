@@ -117,7 +117,7 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
 #define MAX_TIMER_PERIOD 86400 /* 1 day max */
 /* A tsc-based timer responsible for triggering statistics printout */
-static uint64_t timer_period = 10; /* default period is 10 seconds */
+static uint64_t timer_period = 3; /* default period is 10 seconds */
 
 #define FLOW_NUM 65536
 
@@ -129,8 +129,8 @@ struct pkt_count
 
 	uint64_t max_packet_len[2];
 	uint64_t min_packet_len[2];
-	uint64_t mean_packet_len[2];
-	uint64_t stddev_packet_len[2];
+	double mean_packet_len[2];
+	double stddev_packet_len[2];
 
 	#ifdef IPG
 	uint64_t ipg[2];
@@ -140,6 +140,21 @@ struct pkt_count
 } __rte_cache_aligned;
 
 static struct pkt_count pkt_ctr[FLOW_NUM] __rte_cache_aligned;
+
+static void
+print_features_extracted()
+{
+	int i, bucket;
+	for(i=0; i< FLOW_NUM; i++)
+	{
+		for (bucket=0; bucket<2; bucket++) {
+			if (pkt_ctr[i].ctr[bucket] > 0) {
+				printf("Flow %d, count: %d, max packet len: %d, min packet leng: %d, mean packet len: %f, stddev packet len: %f\n", i, 
+					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].stddev_packet_len[bucket]);
+			}
+		}
+	}
+}
 
 /* Print out statistics on packets dropped */
 static void
@@ -185,6 +200,8 @@ print_stats(void)
 		   total_packets_rx,
 		   total_packets_dropped);
 	printf("\n====================================================\n");
+
+	print_features_extracted();
 
 	fflush(stdout);
 }
@@ -782,20 +799,6 @@ check_all_ports_link_status(uint32_t port_mask)
 	}
 }
 
-static void
-print_features_extracted()
-{
-	int i, bucket;
-	for(i=0; i< FLOW_NUM; i++)
-	{
-		for (bucket=0; bucket<2; bucket++) {
-			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d, count: %d, max packet length: %d\n", i, pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket]);
-			}
-		}
-	}
-}
-
 
 // static void
 // print_welcome()
@@ -819,7 +822,6 @@ signal_handler(int signum)
 		force_quit = true;
 	}
 
-	print_features_extracted();
 }
 
 int
