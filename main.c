@@ -128,6 +128,9 @@ struct pkt_count
 	uint32_t ctr[3];
 
 	uint64_t max_packet_len[2];
+	uint64_t min_packet_len[2];
+	uint64_t mean_packet_len[2];
+	uint64_t stddev_packet_len[2];
 
 	#ifdef IPG
 	uint64_t ipg[2];
@@ -263,13 +266,16 @@ perform_analytics(struct rte_mbuf *m)
 	RTE_SET_USED(timestamp);
 	#endif
 
-	rte_pktmbuf_free(m);
+	// rte_pktmbuf_free(m);
 	if(pkt_ctr[index_l].hi_f1 == 0)
 	{
 		pkt_ctr[index_l].hi_f1 = index_h;
 		pkt_ctr[index_l].ctr[0]++;
 
 		pkt_ctr[index_l].max_packet_len[0] = packet_len;
+		pkt_ctr[index_l].min_packet_len[0] = packet_len;
+		pkt_ctr[index_l].mean_packet_len[0] = packet_len;
+		pkt_ctr[index_l].stddev_packet_len[0] = 0;
 
 		#ifdef IPG
 		pkt_ctr[index_l].avg[0] = pkt_ctr[index_l].ipg[0];
@@ -281,6 +287,9 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].ctr[1]++;
 
 		pkt_ctr[index_l].max_packet_len[1] = packet_len;
+		pkt_ctr[index_l].min_packet_len[1] = packet_len;
+		pkt_ctr[index_l].mean_packet_len[1] = packet_len;
+		pkt_ctr[index_l].stddev_packet_len[1] = 0;
 
 		#ifdef IPG
 		pkt_ctr[index_l].avg[1] = pkt_ctr[index_l].ipg[1];
@@ -294,6 +303,13 @@ perform_analytics(struct rte_mbuf *m)
 
 			if (pkt_ctr[index_l].max_packet_len[0] < packet_len)
 				pkt_ctr[index_l].max_packet_len[0] = packet_len;
+
+			if (pkt_ctr[index_l].min_packet_len[0] > packet_len)
+				pkt_ctr[index_l].min_packet_len[0] = packet_len;
+
+			double old_mean = pkt_ctr[index_l].mean_packet_len[0];
+			pkt_ctr[index_l].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[0];
+			pkt_ctr[index_l].stddev_packet_len[0] += (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0]);
 
 			#ifdef IPG
 			curr = global - 1 - pkt_ctr[index_l].ipg[0];
@@ -313,6 +329,13 @@ perform_analytics(struct rte_mbuf *m)
 
 			if (pkt_ctr[index_l].max_packet_len[1] < packet_len)
 				pkt_ctr[index_l].max_packet_len[1] = packet_len;
+
+			if (pkt_ctr[index_l].min_packet_len[1] > packet_len)
+				pkt_ctr[index_l].min_packet_len[1] = packet_len;
+
+			double old_mean = pkt_ctr[index_l].mean_packet_len[1];
+			pkt_ctr[index_l].mean_packet_len[1] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[1];
+			pkt_ctr[index_l].stddev_packet_len[1] += (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[1]);
 
 			#ifdef IPG
 				curr = global - 1 - pkt_ctr[index_l].ipg[1];
