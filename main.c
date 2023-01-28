@@ -137,6 +137,9 @@ struct pkt_count
 	uint64_t max_interarrival_time[2];
 	double mean_interarrival_time[2];
 
+	unsigned char ip_src[2][4];
+	unsigned char ip_dst[2][4];
+
 	#ifdef IPG
 	uint64_t ipg[2];
 	double avg[2];
@@ -158,6 +161,13 @@ hwts_field(struct rte_mbuf *mbuf)
 typedef uint64_t tsc_t;
 static int tsc_dynfield_offset = -1;
 
+#define uint32_t_to_char(ip, a, b, c, d) do {\
+    *a = (unsigned char)(ip >> 24 & 0xff);\
+    *b = (unsigned char)(ip >> 16 & 0xff);\
+    *c = (unsigned char)(ip >> 8 & 0xff);\
+    *d = (unsigned char)(ip & 0xff);\
+} while (0)
+
 static void
 print_features_extracted()
 {
@@ -166,7 +176,9 @@ print_features_extracted()
 	{
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d, count: %d, max packet len: %d, min packet leng: %d, mean packet len: %f, stddev packet len: %f, mean interarrival time: %f\n", i, 
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %d, min packet leng: %d, mean packet len: %f, stddev packet len: %f, mean interarrival time: %f\n", i, 
+					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
+					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].stddev_packet_len[bucket], pkt_ctr[i].mean_interarrival_time[bucket]);
 			}
 		}
@@ -317,6 +329,20 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].min_interarrival_time[0] = 0xFFFFFFFF;
 		pkt_ctr[index_l].mean_interarrival_time[0] = 0;
 
+		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+			uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
+			&(pkt_ctr[index_l].ip_src[0][0]), 
+			&(pkt_ctr[index_l].ip_src[0][1]), 
+			&(pkt_ctr[index_l].ip_src[0][2]), 
+			&(pkt_ctr[index_l].ip_src[0][3]));
+
+			uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
+			&(pkt_ctr[index_l].ip_dst[0][0]), 
+			&(pkt_ctr[index_l].ip_dst[0][1]), 
+			&(pkt_ctr[index_l].ip_dst[0][2]), 
+			&(pkt_ctr[index_l].ip_dst[0][3]));
+		}
+
 		#ifdef IPG
 		pkt_ctr[index_l].avg[0] = pkt_ctr[index_l].ipg[0];
 		#endif
@@ -336,6 +362,20 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].max_interarrival_time[1] = 0;
 		pkt_ctr[index_l].min_interarrival_time[1] = 0xFFFFFFFF;
 		pkt_ctr[index_l].mean_interarrival_time[1] = 0;
+
+		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+			uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
+			&(pkt_ctr[index_l].ip_src[1][0]), 
+			&(pkt_ctr[index_l].ip_src[1][1]), 
+			&(pkt_ctr[index_l].ip_src[1][2]), 
+			&(pkt_ctr[index_l].ip_src[1][3]));
+
+			uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
+			&(pkt_ctr[index_l].ip_dst[1][0]), 
+			&(pkt_ctr[index_l].ip_dst[1][1]), 
+			&(pkt_ctr[index_l].ip_dst[1][2]), 
+			&(pkt_ctr[index_l].ip_dst[1][3]));
+		}
 
 		#ifdef IPG
 		pkt_ctr[index_l].avg[1] = pkt_ctr[index_l].ipg[1];
