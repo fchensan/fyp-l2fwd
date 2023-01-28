@@ -132,6 +132,11 @@ struct pkt_count
 	double mean_packet_len[2];
 	double stddev_packet_len[2];
 
+	uint64_t last_seen[2];
+	uint64_t min_interarrival_time[2];
+	uint64_t max_interarrival_time[2];
+	double mean_interarrival_time[2];
+
 	#ifdef IPG
 	uint64_t ipg[2];
 	double avg[2];
@@ -141,6 +146,18 @@ struct pkt_count
 
 static struct pkt_count pkt_ctr[FLOW_NUM] __rte_cache_aligned;
 
+static int hwts_dynfield_offset = -1;
+
+static inline rte_mbuf_timestamp_t *
+hwts_field(struct rte_mbuf *mbuf)
+{
+	return RTE_MBUF_DYNFIELD(mbuf,
+			hwts_dynfield_offset, rte_mbuf_timestamp_t *);
+}
+
+typedef uint64_t tsc_t;
+static int tsc_dynfield_offset = -1;
+
 static void
 print_features_extracted()
 {
@@ -149,8 +166,8 @@ print_features_extracted()
 	{
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d, count: %d, max packet len: %d, min packet leng: %d, mean packet len: %f, stddev packet len: %f\n", i, 
-					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].stddev_packet_len[bucket]);
+				printf("Flow %d, count: %d, max packet len: %d, min packet leng: %d, mean packet len: %f, stddev packet len: %f, mean interarrival time: %f\n", i, 
+					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].stddev_packet_len[bucket], pkt_ctr[i].mean_interarrival_time[bucket]);
 			}
 		}
 	}
@@ -294,6 +311,12 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].mean_packet_len[0] = packet_len;
 		pkt_ctr[index_l].stddev_packet_len[0] = 0;
 
+		uint64_t now = *hwts_field(m);
+		pkt_ctr[index_l].last_seen[0] = now;
+		pkt_ctr[index_l].max_interarrival_time[0] = 0;
+		pkt_ctr[index_l].min_interarrival_time[0] = 0xFFFFFFFF;
+		pkt_ctr[index_l].mean_interarrival_time[0] = 0;
+
 		#ifdef IPG
 		pkt_ctr[index_l].avg[0] = pkt_ctr[index_l].ipg[0];
 		#endif
@@ -307,6 +330,12 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].min_packet_len[1] = packet_len;
 		pkt_ctr[index_l].mean_packet_len[1] = packet_len;
 		pkt_ctr[index_l].stddev_packet_len[1] = 0;
+
+		uint64_t now = *hwts_field(m);
+		pkt_ctr[index_l].last_seen[1] = now;
+		pkt_ctr[index_l].max_interarrival_time[1] = 0;
+		pkt_ctr[index_l].min_interarrival_time[1] = 0xFFFFFFFF;
+		pkt_ctr[index_l].mean_interarrival_time[1] = 0;
 
 		#ifdef IPG
 		pkt_ctr[index_l].avg[1] = pkt_ctr[index_l].ipg[1];
@@ -328,6 +357,22 @@ perform_analytics(struct rte_mbuf *m)
 			pkt_ctr[index_l].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[0];
 			pkt_ctr[index_l].stddev_packet_len[0] += (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0]);
 
+			uint64_t now = *hwts_field(m);
+
+			uint64_t delta = now - pkt_ctr[index_l].last_seen[0];
+			pkt_ctr[index_l].last_seen[0] = now;
+
+			if (pkt_ctr[index_l].max_interarrival_time[0] < delta)
+				pkt_ctr[index_l].max_interarrival_time[0] = delta;
+
+			if (pkt_ctr[index_l].min_interarrival_time[0] > delta)
+				pkt_ctr[index_l].min_interarrival_time[0] = delta;
+
+			if (pkt_ctr[index_l].mean_interarrival_time[0] == 0)
+				pkt_ctr[index_l].mean_interarrival_time[0] = delta;
+			else
+				pkt_ctr[index_l].mean_interarrival_time[0] += (delta - pkt_ctr[index_l].mean_interarrival_time[0]) / (pkt_ctr[index_l].ctr[0] - 1);
+			
 			#ifdef IPG
 			curr = global - 1 - pkt_ctr[index_l].ipg[0];
 
@@ -353,6 +398,22 @@ perform_analytics(struct rte_mbuf *m)
 			double old_mean = pkt_ctr[index_l].mean_packet_len[1];
 			pkt_ctr[index_l].mean_packet_len[1] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[1];
 			pkt_ctr[index_l].stddev_packet_len[1] += (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[1]);
+
+			uint64_t now = *hwts_field(m);
+
+			uint64_t delta = now - pkt_ctr[index_l].last_seen[1];
+			pkt_ctr[index_l].last_seen[1] = now;
+
+			if (pkt_ctr[index_l].max_interarrival_time[1] < delta)
+				pkt_ctr[index_l].max_interarrival_time[1] = delta;
+
+			if (pkt_ctr[index_l].min_interarrival_time[1] > delta)
+				pkt_ctr[index_l].min_interarrival_time[1] = delta;
+
+			if (pkt_ctr[index_l].mean_interarrival_time[1] == 0)
+				pkt_ctr[index_l].mean_interarrival_time[1] = delta;
+			else
+				pkt_ctr[index_l].mean_interarrival_time[1] += (delta - pkt_ctr[index_l].mean_interarrival_time[1]) / (pkt_ctr[index_l].ctr[1] - 1);
 
 			#ifdef IPG
 				curr = global - 1 - pkt_ctr[index_l].ipg[1];
@@ -837,6 +898,12 @@ main(int argc, char **argv)
 	unsigned int nb_lcores = 0;
 	unsigned int nb_mbufs;
 
+	static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
+		.name = "example_bbdev_dynfield_tsc",
+		.size = sizeof(tsc_t),
+		.align = __alignof__(tsc_t),
+	};
+
 	/* init EAL */
 	ret = rte_eal_init(argc, argv);
 	if (ret < 0)
@@ -948,6 +1015,11 @@ main(int argc, char **argv)
 	if (l2fwd_pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 
+	tsc_dynfield_offset =
+		rte_mbuf_dynfield_register(&tsc_dynfield_desc);
+	if (tsc_dynfield_offset < 0)
+		rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
+
 	/* Initialise each port */
 	RTE_ETH_FOREACH_DEV(portid) {
 		struct rte_eth_rxconf rxq_conf;
@@ -975,6 +1047,19 @@ main(int argc, char **argv)
 		if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
 			local_port_conf.txmode.offloads |=
 				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+
+		if (!(dev_info.rx_offload_capa & DEV_RX_OFFLOAD_TIMESTAMP)) {
+			printf("\nERROR: Port %u does not support hardware timestamping\n"
+					, portid);
+			return -1;
+		}
+		local_port_conf.rxmode.offloads |= DEV_RX_OFFLOAD_TIMESTAMP;
+		rte_mbuf_dyn_rx_timestamp_register(&hwts_dynfield_offset, NULL);
+		if (hwts_dynfield_offset < 0) {
+			printf("ERROR: Failed to register timestamp field\n");
+			return -rte_errno;
+		}
+
 		ret = rte_eth_dev_configure(portid, 1, 1, &local_port_conf);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Cannot configure device: err=%d, port=%u\n",
