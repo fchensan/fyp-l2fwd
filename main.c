@@ -130,7 +130,7 @@ struct pkt_count
 	uint64_t max_packet_len[2];
 	uint64_t min_packet_len[2];
 	double mean_packet_len[2];
-	double stddev_packet_len[2];
+	double variance_packet_len[2];
 
 	uint64_t last_seen[2];
 	uint64_t min_interarrival_time[2];
@@ -176,10 +176,10 @@ print_features_extracted()
 	{
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld, mean packet len: %f, stddev packet len: %f, mean interarrival time: %f\n", i, 
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld, mean packet len: %f, variance packet len: %f, mean interarrival time: %f\n", i, 
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
-					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].stddev_packet_len[bucket], pkt_ctr[i].mean_interarrival_time[bucket]);
+					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket], pkt_ctr[i].mean_interarrival_time[bucket]);
 			}
 		}
 	}
@@ -321,7 +321,7 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].max_packet_len[0] = packet_len;
 		pkt_ctr[index_l].min_packet_len[0] = packet_len;
 		pkt_ctr[index_l].mean_packet_len[0] = packet_len;
-		pkt_ctr[index_l].stddev_packet_len[0] = 0;
+		pkt_ctr[index_l].variance_packet_len[0] = 0;
 
 		uint64_t now = *hwts_field(m);
 		pkt_ctr[index_l].last_seen[0] = now;
@@ -355,7 +355,7 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].max_packet_len[1] = packet_len;
 		pkt_ctr[index_l].min_packet_len[1] = packet_len;
 		pkt_ctr[index_l].mean_packet_len[1] = packet_len;
-		pkt_ctr[index_l].stddev_packet_len[1] = 0;
+		pkt_ctr[index_l].variance_packet_len[1] = 0;
 
 		uint64_t now = *hwts_field(m);
 		pkt_ctr[index_l].last_seen[1] = now;
@@ -395,7 +395,9 @@ perform_analytics(struct rte_mbuf *m)
 
 			double old_mean = pkt_ctr[index_l].mean_packet_len[0];
 			pkt_ctr[index_l].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[0];
-			pkt_ctr[index_l].stddev_packet_len[0] += (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0]);
+			pkt_ctr[index_l].variance_packet_len[0] = (
+				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0])
+				) / pkt_ctr[index_l].ctr[0];
 
 			uint64_t now = *hwts_field(m);
 
@@ -437,7 +439,9 @@ perform_analytics(struct rte_mbuf *m)
 
 			double old_mean = pkt_ctr[index_l].mean_packet_len[1];
 			pkt_ctr[index_l].mean_packet_len[1] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[1];
-			pkt_ctr[index_l].stddev_packet_len[1] += (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[1]);
+			pkt_ctr[index_l].variance_packet_len[0] = (
+				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0])
+				) / pkt_ctr[index_l].ctr[0];
 
 			uint64_t now = *hwts_field(m);
 
