@@ -299,7 +299,7 @@ perform_analytics(struct rte_mbuf *m)
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 		ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
 		l3_len = sizeof(struct rte_ipv4_hdr);
-		packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len;
+		packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
 	}
 
 	uint32_t index_h, index_l;
