@@ -176,7 +176,7 @@ print_features_extracted()
 	{
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %d, min packet leng: %d, mean packet len: %f, stddev packet len: %f, mean interarrival time: %f\n", i, 
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld, mean packet len: %f, stddev packet len: %f, mean interarrival time: %f\n", i, 
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].stddev_packet_len[bucket], pkt_ctr[i].mean_interarrival_time[bucket]);
