@@ -136,6 +136,7 @@ struct pkt_count
 	uint64_t min_interarrival_time[2];
 	uint64_t max_interarrival_time[2];
 	double mean_interarrival_time[2];
+	double variance_interarrival_time[2];
 
 	unsigned char ip_src[2][4];
 	unsigned char ip_dst[2][4];
@@ -176,10 +177,11 @@ print_features_extracted()
 	{
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld, mean packet len: %f, variance packet len: %f, mean interarrival time: %f\n", i, 
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld, mean packet len: %f, variance packet len: %f, mean interarrival time: %f, variance interarrival time: %f\n", i, 
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
-					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket], pkt_ctr[i].mean_interarrival_time[bucket]);
+					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket], pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket], 
+					pkt_ctr[i].mean_interarrival_time[bucket], pkt_ctr[i].variance_interarrival_time[bucket]);
 			}
 		}
 	}
@@ -328,6 +330,7 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].max_interarrival_time[0] = 0;
 		pkt_ctr[index_l].min_interarrival_time[0] = 0xFFFFFFFF;
 		pkt_ctr[index_l].mean_interarrival_time[0] = 0;
+		pkt_ctr[index_l].variance_interarrival_time[0] = 0;
 
 		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 			uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
@@ -362,6 +365,7 @@ perform_analytics(struct rte_mbuf *m)
 		pkt_ctr[index_l].max_interarrival_time[1] = 0;
 		pkt_ctr[index_l].min_interarrival_time[1] = 0xFFFFFFFF;
 		pkt_ctr[index_l].mean_interarrival_time[1] = 0;
+		pkt_ctr[index_l].variance_interarrival_time[1] = 0;
 
 		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 			uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
@@ -404,6 +408,8 @@ perform_analytics(struct rte_mbuf *m)
 			uint64_t delta = now - pkt_ctr[index_l].last_seen[0];
 			pkt_ctr[index_l].last_seen[0] = now;
 
+			double old_variance_mean = pkt_ctr[index_l].mean_interarrival_time[0];
+
 			if (pkt_ctr[index_l].max_interarrival_time[0] < delta)
 				pkt_ctr[index_l].max_interarrival_time[0] = delta;
 
@@ -413,7 +419,11 @@ perform_analytics(struct rte_mbuf *m)
 			if (pkt_ctr[index_l].mean_interarrival_time[0] == 0)
 				pkt_ctr[index_l].mean_interarrival_time[0] = delta;
 			else
-				pkt_ctr[index_l].mean_interarrival_time[0] += (delta - pkt_ctr[index_l].mean_interarrival_time[0]) / (pkt_ctr[index_l].ctr[0] - 1);
+				pkt_ctr[index_l].mean_interarrival_time[0] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[0] - 1);
+
+			pkt_ctr[index_l].variance_interarrival_time[0] = (
+				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
+				) / pkt_ctr[index_l].ctr[0];
 			
 			#ifdef IPG
 			curr = global - 1 - pkt_ctr[index_l].ipg[0];
@@ -448,6 +458,8 @@ perform_analytics(struct rte_mbuf *m)
 			uint64_t delta = now - pkt_ctr[index_l].last_seen[1];
 			pkt_ctr[index_l].last_seen[1] = now;
 
+			double old_variance_mean = pkt_ctr[index_l].mean_interarrival_time[1];
+
 			if (pkt_ctr[index_l].max_interarrival_time[1] < delta)
 				pkt_ctr[index_l].max_interarrival_time[1] = delta;
 
@@ -457,7 +469,11 @@ perform_analytics(struct rte_mbuf *m)
 			if (pkt_ctr[index_l].mean_interarrival_time[1] == 0)
 				pkt_ctr[index_l].mean_interarrival_time[1] = delta;
 			else
-				pkt_ctr[index_l].mean_interarrival_time[1] += (delta - pkt_ctr[index_l].mean_interarrival_time[1]) / (pkt_ctr[index_l].ctr[1] - 1);
+				pkt_ctr[index_l].mean_interarrival_time[1] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[1] - 1);
+			
+			pkt_ctr[index_l].variance_interarrival_time[1] = (
+				(pkt_ctr[index_l].ctr[1] - 1) * pkt_ctr[index_l].variance_interarrival_time[1] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[1])
+				) / pkt_ctr[index_l].ctr[1];
 
 			#ifdef IPG
 				curr = global - 1 - pkt_ctr[index_l].ipg[1];
