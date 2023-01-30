@@ -272,6 +272,42 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 }
 
 static void
+init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr) {
+	pkt_ctr[index_l].hi_f1 = index_h;
+	pkt_ctr[index_l].ctr[bucket]++;
+
+	pkt_ctr[index_l].max_packet_len[bucket] = packet_len;
+	pkt_ctr[index_l].min_packet_len[bucket] = packet_len;
+	pkt_ctr[index_l].mean_packet_len[bucket] = packet_len;
+	pkt_ctr[index_l].variance_packet_len[bucket] = 0;
+
+	uint64_t now = *hwts_field(m);
+	pkt_ctr[index_l].last_seen[bucket] = now;
+	pkt_ctr[index_l].max_interarrival_time[bucket] = 0;
+	pkt_ctr[index_l].min_interarrival_time[bucket] = 0xFFFFFFFF;
+	pkt_ctr[index_l].mean_interarrival_time[bucket] = 0;
+	pkt_ctr[index_l].variance_interarrival_time[bucket] = 0;
+
+	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
+		&(pkt_ctr[index_l].ip_src[bucket][0]), 
+		&(pkt_ctr[index_l].ip_src[bucket][1]), 
+		&(pkt_ctr[index_l].ip_src[bucket][2]), 
+		&(pkt_ctr[index_l].ip_src[bucket][3]));
+
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
+		&(pkt_ctr[index_l].ip_dst[bucket][0]), 
+		&(pkt_ctr[index_l].ip_dst[bucket][1]), 
+		&(pkt_ctr[index_l].ip_dst[bucket][2]), 
+		&(pkt_ctr[index_l].ip_dst[bucket][3]));
+	}
+
+	#ifdef IPG
+	pkt_ctr[index].avg[bucket] = pkt_ctr[index].ipg[bucket];
+	#endif
+}
+
+static void
 perform_analytics(struct rte_mbuf *m)
 {
 
@@ -317,73 +353,11 @@ perform_analytics(struct rte_mbuf *m)
 	// rte_pktmbuf_free(m);
 	if(pkt_ctr[index_l].hi_f1 == 0)
 	{
-		pkt_ctr[index_l].hi_f1 = index_h;
-		pkt_ctr[index_l].ctr[0]++;
-
-		pkt_ctr[index_l].max_packet_len[0] = packet_len;
-		pkt_ctr[index_l].min_packet_len[0] = packet_len;
-		pkt_ctr[index_l].mean_packet_len[0] = packet_len;
-		pkt_ctr[index_l].variance_packet_len[0] = 0;
-
-		uint64_t now = *hwts_field(m);
-		pkt_ctr[index_l].last_seen[0] = now;
-		pkt_ctr[index_l].max_interarrival_time[0] = 0;
-		pkt_ctr[index_l].min_interarrival_time[0] = 0xFFFFFFFF;
-		pkt_ctr[index_l].mean_interarrival_time[0] = 0;
-		pkt_ctr[index_l].variance_interarrival_time[0] = 0;
-
-		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-			uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
-			&(pkt_ctr[index_l].ip_src[0][0]), 
-			&(pkt_ctr[index_l].ip_src[0][1]), 
-			&(pkt_ctr[index_l].ip_src[0][2]), 
-			&(pkt_ctr[index_l].ip_src[0][3]));
-
-			uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
-			&(pkt_ctr[index_l].ip_dst[0][0]), 
-			&(pkt_ctr[index_l].ip_dst[0][1]), 
-			&(pkt_ctr[index_l].ip_dst[0][2]), 
-			&(pkt_ctr[index_l].ip_dst[0][3]));
-		}
-
-		#ifdef IPG
-		pkt_ctr[index_l].avg[0] = pkt_ctr[index_l].ipg[0];
-		#endif
+		init_counters(index_l, index_h, 0, m, packet_len, ipv4_hdr);
 	}
 	else if(pkt_ctr[index_l].hi_f2 == 0 && pkt_ctr[index_l].hi_f1 != index_h)
 	{
-		pkt_ctr[index_l].hi_f2 = index_h;
-		pkt_ctr[index_l].ctr[1]++;
-
-		pkt_ctr[index_l].max_packet_len[1] = packet_len;
-		pkt_ctr[index_l].min_packet_len[1] = packet_len;
-		pkt_ctr[index_l].mean_packet_len[1] = packet_len;
-		pkt_ctr[index_l].variance_packet_len[1] = 0;
-
-		uint64_t now = *hwts_field(m);
-		pkt_ctr[index_l].last_seen[1] = now;
-		pkt_ctr[index_l].max_interarrival_time[1] = 0;
-		pkt_ctr[index_l].min_interarrival_time[1] = 0xFFFFFFFF;
-		pkt_ctr[index_l].mean_interarrival_time[1] = 0;
-		pkt_ctr[index_l].variance_interarrival_time[1] = 0;
-
-		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-			uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
-			&(pkt_ctr[index_l].ip_src[1][0]), 
-			&(pkt_ctr[index_l].ip_src[1][1]), 
-			&(pkt_ctr[index_l].ip_src[1][2]), 
-			&(pkt_ctr[index_l].ip_src[1][3]));
-
-			uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
-			&(pkt_ctr[index_l].ip_dst[1][0]), 
-			&(pkt_ctr[index_l].ip_dst[1][1]), 
-			&(pkt_ctr[index_l].ip_dst[1][2]), 
-			&(pkt_ctr[index_l].ip_dst[1][3]));
-		}
-
-		#ifdef IPG
-		pkt_ctr[index_l].avg[1] = pkt_ctr[index_l].ipg[1];
-		#endif
+		init_counters(index_l, index_h, 1, m, packet_len, ipv4_hdr);
 	}
 	else
 	{
