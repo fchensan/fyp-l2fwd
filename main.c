@@ -1151,9 +1151,24 @@ main(int argc, char **argv)
 				"Error during getting device (port %u) info: %s\n",
 				portid, strerror(-ret));
 
+		/* Configure hardware hash 8< */
+		local_port_conf.rx_adv_conf.rss_conf.rss_hf &=
+			dev_info.flow_type_rss_offloads;
+
+		if (local_port_conf.rx_adv_conf.rss_conf.rss_hf !=
+				port_conf.rx_adv_conf.rss_conf.rss_hf) {
+			printf("Port %u modified RSS hash function based on hardware support,"
+				"requested:%#"PRIx64" configured:%#"PRIx64"\n",
+				portid,
+				port_conf.rx_adv_conf.rss_conf.rss_hf,
+				local_port_conf.rx_adv_conf.rss_conf.rss_hf);
+		}
+		/* End configure hardware hash 8< */
+
 		if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
 			local_port_conf.txmode.offloads |=
 				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+
 		/* Configure hardware timestamps for port 8< */
 		if (!(dev_info.rx_offload_capa & DEV_RX_OFFLOAD_TIMESTAMP)) {
 			printf("\nERROR: Port %u does not support hardware timestamping\n"
