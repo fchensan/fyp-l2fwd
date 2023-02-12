@@ -93,12 +93,21 @@ static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 
 static struct rte_eth_conf port_conf = {
 	.rxmode = {
+		/* Disable Header Split (i.e. storing packet headers
+		 * and contents in different buffers) */
 		.split_hdr_size = 0,
+		/* Enable Receive Side Scaling, i.e. distribution of
+		 * received packets amoung the RX queues. Has an important
+		 * side-effect of allowing to enable hardware hashing
+		 * (TODO: or does it?). */
 		.mq_mode = ETH_MQ_RX_RSS,
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
+			/* Use a random hash key for hash function. */
 			.rss_key = NULL,
+			/* Use 5-tuple (src and dst IP addresses, src and dst ports
+			 * and the transport protocol UDP/TCP) to form flow hash */
 			.rss_hf = ETH_RSS_IP | ETH_RSS_UDP | ETH_RSS_TCP //ETH_RSS_PROTO_MASK,
 		}
 	},
@@ -619,10 +628,10 @@ l2fwd_launch_one_lcore(__rte_unused void *dummy)
 static void
 l2fwd_usage(const char *prgname)
 {
-	printf("%s [EAL options] -- -p PORTMASK [-q NQ]\n"
+	printf("%1$s [EAL options] -- -p PORTMASK [-q NQ]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
-	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
+	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 3 default, 86400 maximum)\n"
 	       "  --[no-]mac-updating: Enable or disable MAC addresses updating (enabled by default)\n"
 	       "      When enabled:\n"
 	       "       - The source MAC address is replaced by the TX port MAC address\n"
@@ -1131,7 +1140,7 @@ main(int argc, char **argv)
 		if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
 			local_port_conf.txmode.offloads |=
 				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
-		/* Configure the number of queues for a port. */
+		/* Configure hardware timestamps for port 8< */
 		if (!(dev_info.rx_offload_capa & DEV_RX_OFFLOAD_TIMESTAMP)) {
 			printf("\nERROR: Port %u does not support hardware timestamping\n"
 					, portid);
@@ -1143,7 +1152,9 @@ main(int argc, char **argv)
 			printf("ERROR: Failed to register timestamp field\n");
 			return -rte_errno;
 		}
+		/* 8> End of configure hardware timestamps for port */
 
+		/* Configure the number of queues for a port. */
 		ret = rte_eth_dev_configure(portid, 1, 1, &local_port_conf);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Cannot configure device: err=%d, port=%u\n",
@@ -1221,6 +1232,7 @@ main(int argc, char **argv)
 
 		printf("done: \n");
 
+		/* Unconditionally turn on Promiscuous mode */
 		ret = rte_eth_promiscuous_enable(portid);
 		if (ret != 0)
 			rte_exit(EXIT_FAILURE,
@@ -1247,6 +1259,7 @@ main(int argc, char **argv)
 
 	check_all_ports_link_status(l2fwd_enabled_port_mask);
 
+	/* initialize flow table 8< */
 	uint32_t i;
 	int j;
 
@@ -1263,6 +1276,7 @@ main(int argc, char **argv)
 			#endif
 		}
 	}
+	/* >8 end of initialize flow table*/
 
 	ret = 0;
 	/* launch per-lcore init on every lcore */
