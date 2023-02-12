@@ -185,11 +185,11 @@ print_features_extracted()
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
 				count++;
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld", i, 
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld", i,
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
-				
+
 				#ifdef MEAN_PACKET_LEN
 				printf("mean packet len: %f, variance packet len: %f", pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket]);
 				#endif
@@ -313,16 +313,16 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 	#endif
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
-		&(pkt_ctr[index_l].ip_src[bucket][0]), 
-		&(pkt_ctr[index_l].ip_src[bucket][1]), 
-		&(pkt_ctr[index_l].ip_src[bucket][2]), 
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr),
+		&(pkt_ctr[index_l].ip_src[bucket][0]),
+		&(pkt_ctr[index_l].ip_src[bucket][1]),
+		&(pkt_ctr[index_l].ip_src[bucket][2]),
 		&(pkt_ctr[index_l].ip_src[bucket][3]));
 
-		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
-		&(pkt_ctr[index_l].ip_dst[bucket][0]), 
-		&(pkt_ctr[index_l].ip_dst[bucket][1]), 
-		&(pkt_ctr[index_l].ip_dst[bucket][2]), 
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr),
+		&(pkt_ctr[index_l].ip_dst[bucket][0]),
+		&(pkt_ctr[index_l].ip_dst[bucket][1]),
+		&(pkt_ctr[index_l].ip_dst[bucket][2]),
 		&(pkt_ctr[index_l].ip_dst[bucket][3]));
 	}
 
@@ -427,7 +427,7 @@ perform_analytics(struct rte_mbuf *m)
 				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
 				) / pkt_ctr[index_l].ctr[0];
 			#endif
-			
+
 			#ifdef IPG
 			curr = global - 1 - pkt_ctr[index_l].ipg[0];
 
@@ -477,7 +477,7 @@ perform_analytics(struct rte_mbuf *m)
 				pkt_ctr[index_l].mean_interarrival_time[1] = delta;
 			else
 				pkt_ctr[index_l].mean_interarrival_time[1] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[1] - 1);
-			
+
 			pkt_ctr[index_l].variance_interarrival_time[1] = (
 				(pkt_ctr[index_l].ctr[1] - 1) * pkt_ctr[index_l].variance_interarrival_time[1] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[1])
 				) / pkt_ctr[index_l].ctr[1];
@@ -932,7 +932,7 @@ check_all_ports_link_status(uint32_t port_mask)
 // static void
 // print_welcome()
 // {
-// 	printf(	
+// 	printf(
 // "   _____                      __  _   ____________   ___                __      __  _          \n
 //   / ___/____ ___  ____ ______/ /_/ | / /  _/ ____/  /   |  ____  ____ _/ /_  __/ /_(_)_________\n
 //   \__ \/ __ `__ \/ __ `/ ___/ __/  |/ // // /      / /| | / __ \/ __ `/ / / / / __/ / ___/ ___/\n
