@@ -588,6 +588,11 @@ l2fwd_main_loop(void)
 			nb_rx = rte_eth_rx_burst(portid, 0,
 						 pkts_burst, MAX_PKT_BURST);
 
+			/* TODO: clarify the deletion
+			if (unlikely(nb_rx == 0))
+				continue;
+			*/
+
 			port_statistics[portid].rx += nb_rx;
 
 			for (j = 0; j < nb_rx; j++) {
@@ -970,12 +975,6 @@ main(int argc, char **argv)
 	unsigned int nb_lcores = 0;
 	unsigned int nb_mbufs;
 
-	static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
-		.name = "example_bbdev_dynfield_tsc",
-		.size = sizeof(tsc_t),
-		.align = __alignof__(tsc_t),
-	};
-
 	/* Init EAL. 8< */
 	ret = rte_eal_init(argc, argv);
 	if (ret < 0)
@@ -1092,10 +1091,18 @@ main(int argc, char **argv)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 	/* >8 End of create the mbuf pool. */
 
+	/* TODO: what is this for? 8< */
+	static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
+		.name = "example_bbdev_dynfield_tsc",
+		.size = sizeof(tsc_t),
+		.align = __alignof__(tsc_t),
+	};
+
 	tsc_dynfield_offset =
 		rte_mbuf_dynfield_register(&tsc_dynfield_desc);
 	if (tsc_dynfield_offset < 0)
 		rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
+	/* >8 end TODO */
 
 	/* Initialise each port */
 	RTE_ETH_FOREACH_DEV(portid) {
@@ -1278,6 +1285,11 @@ main(int argc, char **argv)
 		rte_eth_dev_close(portid);
 		printf(" Done\n");
 	}
+
+	/* TODO: clarify the deletion
+	// clean up the EAL
+	rte_eal_cleanup();
+	*/
 	printf("Bye...\n");
 
 	return ret;
