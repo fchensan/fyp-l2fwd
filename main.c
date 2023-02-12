@@ -841,6 +841,9 @@ l2fwd_parse_args(int argc, char **argv)
 			enable_analytics = 1;
 			break;
 
+		case 0:
+			break;
+
 		default:
 			l2fwd_usage(prgname);
 			return -1;
@@ -997,6 +1000,7 @@ main(int argc, char **argv)
 	unsigned nb_ports_in_mask = 0;
 	unsigned int nb_lcores = 0;
 	unsigned int nb_mbufs;
+	uint32_t i, j;
 
 	/* Init EAL. 8< */
 	ret = rte_eal_init(argc, argv);
@@ -1289,13 +1293,10 @@ main(int argc, char **argv)
 	check_all_ports_link_status(l2fwd_enabled_port_mask);
 
 	/* initialize flow table 8< */
-	uint32_t i;
-	int j;
-
-	for(i=0; i< FLOW_NUM; i++)
+	for(i = 0; i< FLOW_NUM; i++)
 	{
 		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
-		for(j=0; j<=2; j++)
+		for(j = 0; j <= 2; j++)
 		{
 			pkt_ctr[i].ctr[j] = 0;
 
