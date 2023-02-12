@@ -48,11 +48,18 @@ static int mac_updating = 1;
 /* Run analytics (disabled by default for debugging and benchmarking) */
 static int enable_analytics = 0;
 
+/* If set by cmdline argument, checks that other cmdline arguments are
+ * in line and enables the simplified, but max performance setup */
+static int benchmarking_mode = 0;
+
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
 #define MAX_PKT_BURST 32
 #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
 #define MEMPOOL_CACHE_SIZE 256
+
+static int num_rx_queues = 1;
+static int num_tx_queues = 1;
 
 /*
  * Configurable number of RX/TX ring descriptors
@@ -288,7 +295,7 @@ l2fwd_mac_updating(struct rte_mbuf *m, unsigned dest_portid)
 
 /* Simple forward. 8< */
 static void
-l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
+l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid, unsigned queueid)
 {
 	unsigned dst_port;
 	int sent;
@@ -300,7 +307,7 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 		l2fwd_mac_updating(m, dst_port);
 
 	buffer = tx_buffer[dst_port];
-	sent = rte_eth_tx_buffer(dst_port, 0, buffer, m);
+	sent = rte_eth_tx_buffer(dst_port, queueid, buffer, m);
 	if (sent)
 		port_statistics[dst_port].tx += sent;
 }
@@ -533,7 +540,10 @@ l2fwd_main_loop(void)
 	timer_tsc = 0;
 
 	lcore_id = rte_lcore_id();
-	qconf = &lcore_queue_conf[lcore_id];
+	if (benchmarking_mode)
+		qconf = &lcore_queue_conf[0];
+	else
+		qconf = &lcore_queue_conf[lcore_id];
 
 	if (qconf->n_rx_port == 0) {
 		RTE_LOG(INFO, L2FWD, "lcore %u has nothing to do\n", lcore_id);
@@ -566,7 +576,7 @@ l2fwd_main_loop(void)
 				portid = l2fwd_dst_ports[qconf->rx_port_list[i]];
 				buffer = tx_buffer[portid];
 
-				sent = rte_eth_tx_buffer_flush(portid, 0, buffer);
+				sent = rte_eth_tx_buffer_flush(portid, lcore_id, buffer);
 				if (sent)
 					port_statistics[portid].tx += sent;
 
@@ -598,7 +608,7 @@ l2fwd_main_loop(void)
 		for (i = 0; i < qconf->n_rx_port; i++) {
 
 			portid = qconf->rx_port_list[i];
-			nb_rx = rte_eth_rx_burst(portid, 0,
+			nb_rx = rte_eth_rx_burst(portid, lcore_id,
 						 pkts_burst, MAX_PKT_BURST);
 
 			/* TODO: clarify the deletion
@@ -615,7 +625,7 @@ l2fwd_main_loop(void)
 					perform_analytics(m);
 
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
-				l2fwd_simple_forward(m, portid);
+				l2fwd_simple_forward(m, portid, lcore_id);
 			}
 		}
 		/* >8 End of read packet from RX queues. */
@@ -643,8 +653,13 @@ l2fwd_usage(const char *prgname)
 	       "       - The destination MAC address is replaced by 02:00:00:00:00:TX_PORT_ID\n"
 	       "  --portmap: Configure forwarding port pair mapping\n"
 	       "	      Default: alternate port pairs\n\n"
-	       "  --analytics: enable analytics\n",
-	       prgname);
+	       "  --analytics: enable analytics\n\n"
+	       "  --benchmarking: benchmarking mode (see below)\n"
+	       " Promiscuous mode is enabled by default. To configure %1$s to run in 8-core RSS run-to-completion mode\n"
+	       " with one RX queue per core, to mirror all packets received on port 0 back to the same port, use the\n"
+	       " following options(<pci-address-of-port-0> can be obtained by running `sudo mst status -v`):\n"
+	       " sudo %1$s -l 0-7 -a <pci-address-of-port-0> -- -p 0x1 --portmap '(0,0)' --benchmarking\n"
+	       , prgname);
 }
 
 static int
@@ -757,6 +772,7 @@ static const char short_options[] =
 	;
 
 #define CMD_LINE_OPT_ANALYTICS "analytics"
+#define CMD_LINE_OPT_BENCHMARKING "benchmarking"
 #define CMD_LINE_OPT_MAC_UPDATING "mac-updating"
 #define CMD_LINE_OPT_NO_MAC_UPDATING "no-mac-updating"
 #define CMD_LINE_OPT_PORTMAP_CONFIG "portmap"
@@ -768,12 +784,15 @@ enum {
 	 * conflict with short options */
 	CMD_LINE_OPT_MIN_NUM = 256,
 	CMD_LINE_OPT_ANALYTICS_NUM,
+	CMD_LINE_OPT_BENCHMARKING_NUM,
 	CMD_LINE_OPT_PORTMAP_NUM,
 };
 
 static const struct option lgopts[] = {
 	{ CMD_LINE_OPT_ANALYTICS, no_argument, 0,
 		CMD_LINE_OPT_ANALYTICS_NUM},
+	{ CMD_LINE_OPT_BENCHMARKING, no_argument, 0,
+		CMD_LINE_OPT_BENCHMARKING_NUM},
 	{ CMD_LINE_OPT_MAC_UPDATING, no_argument, &mac_updating, 1},
 	{ CMD_LINE_OPT_NO_MAC_UPDATING, no_argument, &mac_updating, 0},
 	{ CMD_LINE_OPT_PORTMAP_CONFIG, 1, 0, CMD_LINE_OPT_PORTMAP_NUM},
@@ -841,11 +860,34 @@ l2fwd_parse_args(int argc, char **argv)
 			enable_analytics = 1;
 			break;
 
+		case CMD_LINE_OPT_BENCHMARKING_NUM:
+			benchmarking_mode = 1;
+			break;
+
 		case 0:
 			break;
 
 		default:
 			l2fwd_usage(prgname);
+			return -1;
+		}
+	}
+
+	if (benchmarking_mode) {
+		num_rx_queues = num_tx_queues = 8;
+		if (l2fwd_enabled_port_mask != 1) {
+			fprintf(stderr, "In benchmarking mode the zeroth and only"
+					" the zeroth port can be enabled\n");
+			return -1;
+		}
+		if (l2fwd_rx_queue_per_lcore != 1) {
+			fprintf(stderr, "In benchmarking mode -q can not be set.\n");
+			return -1;
+		}
+		if (nb_port_pair_params != 1 ||
+				port_pair_params[0].port[0] != 0 ||
+				port_pair_params[0].port[1] != 0) {
+			fprintf(stderr, "In benchmarking mode --portmap '(0,0)' must be used.\n");
 			return -1;
 		}
 	}
@@ -1188,7 +1230,7 @@ main(int argc, char **argv)
 		/* 8> End of configure hardware timestamps for port */
 
 		/* Configure the number of queues for a port. */
-		ret = rte_eth_dev_configure(portid, 1, 1, &local_port_conf);
+		ret = rte_eth_dev_configure(portid, num_rx_queues, num_tx_queues, &local_port_conf);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Cannot configure device: err=%d, port=%u\n",
 				  ret, portid);
@@ -1208,31 +1250,35 @@ main(int argc, char **argv)
 				 "Cannot get MAC address: err=%d, port=%u\n",
 				 ret, portid);
 
-		/* init one RX queue */
+		/* init RX queues */
 		fflush(stdout);
 		rxq_conf = dev_info.default_rxconf;
 		rxq_conf.offloads = local_port_conf.rxmode.offloads;
-		/* RX queue setup. 8< */
-		ret = rte_eth_rx_queue_setup(portid, 0, nb_rxd,
-					     rte_eth_dev_socket_id(portid),
-					     &rxq_conf,
-					     l2fwd_pktmbuf_pool);
-		if (ret < 0)
-			rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
-				  ret, portid);
+		/* RX queues setup. 8< */
+		for (i = 0; i < num_rx_queues; i++) {
+			ret = rte_eth_rx_queue_setup(portid, i, nb_rxd,
+						     rte_eth_dev_socket_id(portid),
+						     &rxq_conf,
+						     l2fwd_pktmbuf_pool);
+			if (ret < 0)
+				rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
+					  ret, portid);
+		}
 		/* >8 End of RX queue setup. */
 
-		/* Init one TX queue on each port. 8< */
+		/* Init TX queues 8< */
 		fflush(stdout);
 		txq_conf = dev_info.default_txconf;
 		txq_conf.offloads = local_port_conf.txmode.offloads;
-		ret = rte_eth_tx_queue_setup(portid, 0, nb_txd,
-				rte_eth_dev_socket_id(portid),
-				&txq_conf);
-		if (ret < 0)
-			rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
-				ret, portid);
-		/* >8 End of init one TX queue on each port. */
+		for (i = 0; i < num_rx_queues; i++) {
+			ret = rte_eth_tx_queue_setup(portid, i, nb_txd,
+					rte_eth_dev_socket_id(portid),
+					&txq_conf);
+			if (ret < 0)
+				rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
+					ret, portid);
+		}
+		/* >8 Init TX queues */
 
 		/* Initialize TX buffers */
 		tx_buffer[portid] = rte_zmalloc_socket("tx_buffer",
