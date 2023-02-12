@@ -337,23 +337,23 @@ perform_analytics(struct rte_mbuf *m)
 
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
-	struct rte_ipv6_hdr *ipv6_hdr;
-	struct rte_tcp_hdr *tcp_hdr;
-	struct rte_udp_hdr *udp_hdr;
+	// struct rte_ipv6_hdr *ipv6_hdr;
+	// struct rte_tcp_hdr *tcp_hdr;
+	// struct rte_udp_hdr *udp_hdr;
 	uint64_t l2_len;
 	uint64_t l3_len;
-	uint64_t l4_len;
+	// uint64_t l4_len;
 	uint64_t packet_len = 0;
-	uint64_t content_len;
-	uint8_t *content;
-	uint16_t src_port;
-	uint16_t dst_port;
-	uint32_t seq;
-	uint32_t ack;
-	char str[64] = {};
-	char hash_value[64] = {};
-	int diff = 0;
-	bool recalc_checksum = false;
+	// uint64_t content_len;
+	// uint8_t *content;
+	// uint16_t src_port;
+	// uint16_t dst_port;
+	// uint32_t seq;
+	// uint32_t ack;
+	// char str[64] = {};
+	// char hash_value[64] = {};
+	// int diff = 0;
+	// bool recalc_checksum = false;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
 	l2_len = sizeof(struct rte_ether_hdr);
