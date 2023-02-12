@@ -45,6 +45,9 @@ static volatile bool force_quit;
 /* MAC updating enabled by default */
 static int mac_updating = 1;
 
+/* Run analytics (disabled by default for debugging and benchmarking) */
+static int enable_analytics = 0;
+
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
 #define MAX_PKT_BURST 32
@@ -261,7 +264,8 @@ print_stats(void)
 		   total_packets_dropped);
 	printf("\n====================================================\n");
 
-	print_features_extracted();
+	if (enable_analytics)
+		print_features_extracted();
 
 	fflush(stdout);
 }
@@ -607,7 +611,8 @@ l2fwd_main_loop(void)
 			for (j = 0; j < nb_rx; j++) {
 				m = pkts_burst[j];
 
-				perform_analytics(m);
+				if (enable_analytics)
+					perform_analytics(m);
 
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 				l2fwd_simple_forward(m, portid);
@@ -637,7 +642,8 @@ l2fwd_usage(const char *prgname)
 	       "       - The source MAC address is replaced by the TX port MAC address\n"
 	       "       - The destination MAC address is replaced by 02:00:00:00:00:TX_PORT_ID\n"
 	       "  --portmap: Configure forwarding port pair mapping\n"
-	       "	      Default: alternate port pairs\n\n",
+	       "	      Default: alternate port pairs\n\n"
+	       "  --analytics: enable analytics\n",
 	       prgname);
 }
 
@@ -750,6 +756,7 @@ static const char short_options[] =
 	"T:"  /* timer period */
 	;
 
+#define CMD_LINE_OPT_ANALYTICS "analytics"
 #define CMD_LINE_OPT_MAC_UPDATING "mac-updating"
 #define CMD_LINE_OPT_NO_MAC_UPDATING "no-mac-updating"
 #define CMD_LINE_OPT_PORTMAP_CONFIG "portmap"
@@ -760,10 +767,13 @@ enum {
 	/* first long only option value must be >= 256, so that we won't
 	 * conflict with short options */
 	CMD_LINE_OPT_MIN_NUM = 256,
+	CMD_LINE_OPT_ANALYTICS_NUM,
 	CMD_LINE_OPT_PORTMAP_NUM,
 };
 
 static const struct option lgopts[] = {
+	{ CMD_LINE_OPT_ANALYTICS, no_argument, 0,
+		CMD_LINE_OPT_ANALYTICS_NUM},
 	{ CMD_LINE_OPT_MAC_UPDATING, no_argument, &mac_updating, 1},
 	{ CMD_LINE_OPT_NO_MAC_UPDATING, no_argument, &mac_updating, 0},
 	{ CMD_LINE_OPT_PORTMAP_CONFIG, 1, 0, CMD_LINE_OPT_PORTMAP_NUM},
@@ -825,6 +835,10 @@ l2fwd_parse_args(int argc, char **argv)
 				l2fwd_usage(prgname);
 				return -1;
 			}
+			break;
+
+		case CMD_LINE_OPT_ANALYTICS_NUM:
+			enable_analytics = 1;
 			break;
 
 		default:
