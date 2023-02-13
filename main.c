@@ -45,6 +45,9 @@ static volatile bool force_quit;
 /* MAC updating enabled by default */
 static int mac_updating = 1;
 
+/* Run analytics (disabled by default for debugging and benchmarking) */
+static int enable_analytics = 0;
+
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
 #define MAX_PKT_BURST 32
@@ -81,22 +84,33 @@ static unsigned int l2fwd_rx_queue_per_lcore = 1;
 
 #define MAX_RX_QUEUE_PER_LCORE 16
 #define MAX_TX_QUEUE_PER_PORT 16
+/* List of queues to be polled for a given lcore. 8< */
 struct lcore_queue_conf {
 	unsigned n_rx_port;
 	unsigned rx_port_list[MAX_RX_QUEUE_PER_LCORE];
 } __rte_cache_aligned;
 struct lcore_queue_conf lcore_queue_conf[RTE_MAX_LCORE];
+/* >8 End of list of queues to be polled for a given lcore. */
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 
 static struct rte_eth_conf port_conf = {
 	.rxmode = {
+		/* Disable Header Split (i.e. storing packet headers
+		 * and contents in different buffers) */
 		.split_hdr_size = 0,
+		/* Enable Receive Side Scaling, i.e. distribution of
+		 * received packets amoung the RX queues. Has an important
+		 * side-effect of allowing to enable hardware hashing
+		 * (TODO: or does it?). */
 		.mq_mode = ETH_MQ_RX_RSS,
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
+			/* Use a random hash key for hash function. */
 			.rss_key = NULL,
+			/* Use 5-tuple (src and dst IP addresses, src and dst ports
+			 * and the transport protocol UDP/TCP) to form flow hash */
 			.rss_hf = ETH_RSS_IP | ETH_RSS_UDP | ETH_RSS_TCP //ETH_RSS_PROTO_MASK,
 		}
 	},
@@ -117,7 +131,7 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
 #define MAX_TIMER_PERIOD 86400 /* 1 day max */
 /* A tsc-based timer responsible for triggering statistics printout */
-static uint64_t timer_period = 3; /* default period is 10 seconds */
+static uint64_t timer_period = 3; /* default period is 3 seconds */
 
 #define FLOW_NUM 65536
 
@@ -185,11 +199,11 @@ print_features_extracted()
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
 				count++;
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld", i, 
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu --> %hhu.%hhu.%hhu.%hhu | count: %d, max packet len: %ld, min packet leng: %ld", i,
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
-				
+
 				#ifdef MEAN_PACKET_LEN
 				printf("mean packet len: %f, variance packet len: %f", pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket]);
 				#endif
@@ -250,7 +264,8 @@ print_stats(void)
 		   total_packets_dropped);
 	printf("\n====================================================\n");
 
-	print_features_extracted();
+	if (enable_analytics)
+		print_features_extracted();
 
 	fflush(stdout);
 }
@@ -271,6 +286,7 @@ l2fwd_mac_updating(struct rte_mbuf *m, unsigned dest_portid)
 	rte_ether_addr_copy(&l2fwd_ports_eth_addr[dest_portid], &eth->s_addr);
 }
 
+/* Simple forward. 8< */
 static void
 l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 {
@@ -288,6 +304,7 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 	if (sent)
 		port_statistics[dst_port].tx += sent;
 }
+/* >8 End of simple forward. */
 
 static void
 init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr) {
@@ -313,16 +330,16 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 	#endif
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr), 
-		&(pkt_ctr[index_l].ip_src[bucket][0]), 
-		&(pkt_ctr[index_l].ip_src[bucket][1]), 
-		&(pkt_ctr[index_l].ip_src[bucket][2]), 
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr),
+		&(pkt_ctr[index_l].ip_src[bucket][0]),
+		&(pkt_ctr[index_l].ip_src[bucket][1]),
+		&(pkt_ctr[index_l].ip_src[bucket][2]),
 		&(pkt_ctr[index_l].ip_src[bucket][3]));
 
-		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr), 
-		&(pkt_ctr[index_l].ip_dst[bucket][0]), 
-		&(pkt_ctr[index_l].ip_dst[bucket][1]), 
-		&(pkt_ctr[index_l].ip_dst[bucket][2]), 
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr),
+		&(pkt_ctr[index_l].ip_dst[bucket][0]),
+		&(pkt_ctr[index_l].ip_dst[bucket][1]),
+		&(pkt_ctr[index_l].ip_dst[bucket][2]),
 		&(pkt_ctr[index_l].ip_dst[bucket][3]));
 	}
 
@@ -427,7 +444,7 @@ perform_analytics(struct rte_mbuf *m)
 				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
 				) / pkt_ctr[index_l].ctr[0];
 			#endif
-			
+
 			#ifdef IPG
 			curr = global - 1 - pkt_ctr[index_l].ipg[0];
 
@@ -477,7 +494,7 @@ perform_analytics(struct rte_mbuf *m)
 				pkt_ctr[index_l].mean_interarrival_time[1] = delta;
 			else
 				pkt_ctr[index_l].mean_interarrival_time[1] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[1] - 1);
-			
+
 			pkt_ctr[index_l].variance_interarrival_time[1] = (
 				(pkt_ctr[index_l].ctr[1] - 1) * pkt_ctr[index_l].variance_interarrival_time[1] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[1])
 				) / pkt_ctr[index_l].ctr[1];
@@ -535,6 +552,7 @@ l2fwd_main_loop(void)
 
 	while (!force_quit) {
 
+		/* Drains TX queue in its main loop. 8< */
 		cur_tsc = rte_rdtsc();
 
 		/*
@@ -574,27 +592,33 @@ l2fwd_main_loop(void)
 
 			prev_tsc = cur_tsc;
 		}
+		/* >8 End of draining TX queue. */
 
-		/*
-		 * Read packet from RX queues
-		 */
+		/* Read packet from RX queues. 8< */
 		for (i = 0; i < qconf->n_rx_port; i++) {
 
 			portid = qconf->rx_port_list[i];
 			nb_rx = rte_eth_rx_burst(portid, 0,
 						 pkts_burst, MAX_PKT_BURST);
 
+			/* TODO: clarify the deletion
+			if (unlikely(nb_rx == 0))
+				continue;
+			*/
+
 			port_statistics[portid].rx += nb_rx;
 
 			for (j = 0; j < nb_rx; j++) {
 				m = pkts_burst[j];
 
-				perform_analytics(m);
+				if (enable_analytics)
+					perform_analytics(m);
 
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 				l2fwd_simple_forward(m, portid);
 			}
 		}
+		/* >8 End of read packet from RX queues. */
 	}
 }
 
@@ -609,16 +633,17 @@ l2fwd_launch_one_lcore(__rte_unused void *dummy)
 static void
 l2fwd_usage(const char *prgname)
 {
-	printf("%s [EAL options] -- -p PORTMASK [-q NQ]\n"
+	printf("%1$s [EAL options] -- -p PORTMASK [-q NQ]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
-	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
+	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 3 default, 86400 maximum)\n"
 	       "  --[no-]mac-updating: Enable or disable MAC addresses updating (enabled by default)\n"
 	       "      When enabled:\n"
 	       "       - The source MAC address is replaced by the TX port MAC address\n"
 	       "       - The destination MAC address is replaced by 02:00:00:00:00:TX_PORT_ID\n"
 	       "  --portmap: Configure forwarding port pair mapping\n"
-	       "	      Default: alternate port pairs\n\n",
+	       "	      Default: alternate port pairs\n\n"
+	       "  --analytics: enable analytics\n",
 	       prgname);
 }
 
@@ -731,6 +756,7 @@ static const char short_options[] =
 	"T:"  /* timer period */
 	;
 
+#define CMD_LINE_OPT_ANALYTICS "analytics"
 #define CMD_LINE_OPT_MAC_UPDATING "mac-updating"
 #define CMD_LINE_OPT_NO_MAC_UPDATING "no-mac-updating"
 #define CMD_LINE_OPT_PORTMAP_CONFIG "portmap"
@@ -741,10 +767,13 @@ enum {
 	/* first long only option value must be >= 256, so that we won't
 	 * conflict with short options */
 	CMD_LINE_OPT_MIN_NUM = 256,
+	CMD_LINE_OPT_ANALYTICS_NUM,
 	CMD_LINE_OPT_PORTMAP_NUM,
 };
 
 static const struct option lgopts[] = {
+	{ CMD_LINE_OPT_ANALYTICS, no_argument, 0,
+		CMD_LINE_OPT_ANALYTICS_NUM},
 	{ CMD_LINE_OPT_MAC_UPDATING, no_argument, &mac_updating, 1},
 	{ CMD_LINE_OPT_NO_MAC_UPDATING, no_argument, &mac_updating, 0},
 	{ CMD_LINE_OPT_PORTMAP_CONFIG, 1, 0, CMD_LINE_OPT_PORTMAP_NUM},
@@ -806,6 +835,13 @@ l2fwd_parse_args(int argc, char **argv)
 				l2fwd_usage(prgname);
 				return -1;
 			}
+			break;
+
+		case CMD_LINE_OPT_ANALYTICS_NUM:
+			enable_analytics = 1;
+			break;
+
+		case 0:
 			break;
 
 		default:
@@ -929,28 +965,27 @@ check_all_ports_link_status(uint32_t port_mask)
 }
 
 
-// static void
-// print_welcome()
-// {
-// 	printf(	
-// "   _____                      __  _   ____________   ___                __      __  _          \n
-//   / ___/____ ___  ____ ______/ /_/ | / /  _/ ____/  /   |  ____  ____ _/ /_  __/ /_(_)_________\n
-//   \__ \/ __ `__ \/ __ `/ ___/ __/  |/ // // /      / /| | / __ \/ __ `/ / / / / __/ / ___/ ___/\n
-//  ___/ / / / / / / /_/ / /  / /_/ /|  // // /___   / ___ |/ / / / /_/ / / /_/ / /_/ / /__(__  ) \n
-// /____/_/ /_/ /_/\__,_/_/   \__/_/ |_/___/\____/  /_/  |_/_/ /_/\__,_/_/\__, /\__/_/\___/____/  \n
-//                                                                       /____/                   \n")
-// }
+static void
+print_welcome(void)
+{
+	printf("\n   _____                      __  _   ____________   ___                __      __  _          \n"
+	       "  / ___/____ ___  ____ ______/ /_/ | / /  _/ ____/  /   |  ____  ____ _/ /_  __/ /_(_)_________\n"
+	       "  \\__ \\/ __ `__ \\/ __ `/ ___/ __/  |/ // // /      / /| | / __ \\/ __ `/ / / / / __/ / ___/ ___/\n"
+	       " ___/ / / / / / / /_/ / /  / /_/ /|  // // /___   / ___ |/ / / / /_/ / / /_/ / /_/ / /__(__  ) \n"
+	       "/____/_/ /_/ /_/\\__,_/_/   \\__/_/ |_/___/\\____/  /_/  |_/_/ /_/\\__,_/_/\\__, /\\__/_/\\___/____/  \n"
+	       "                                                                      /____/                   \n");
+}
+
 
 static void
 signal_handler(int signum)
 {
-	// print_welcome();
+	print_welcome();
 	if (signum == SIGINT || signum == SIGTERM) {
 		printf("\n\nSignal %d received, preparing to exit...\n",
 				signum);
 		force_quit = true;
 	}
-
 }
 
 int
@@ -965,14 +1000,9 @@ main(int argc, char **argv)
 	unsigned nb_ports_in_mask = 0;
 	unsigned int nb_lcores = 0;
 	unsigned int nb_mbufs;
+	uint32_t i, j;
 
-	static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
-		.name = "example_bbdev_dynfield_tsc",
-		.size = sizeof(tsc_t),
-		.align = __alignof__(tsc_t),
-	};
-
-	/* init EAL */
+	/* Init EAL. 8< */
 	ret = rte_eal_init(argc, argv);
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "Invalid EAL arguments\n");
@@ -987,6 +1017,7 @@ main(int argc, char **argv)
 	ret = l2fwd_parse_args(argc, argv);
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "Invalid L2FWD arguments\n");
+	/* >8 End of init EAL. */
 
 	printf("MAC updating %s\n", mac_updating ? "enabled" : "disabled");
 
@@ -1006,6 +1037,8 @@ main(int argc, char **argv)
 	if (l2fwd_enabled_port_mask & ~((1 << nb_ports) - 1))
 		rte_exit(EXIT_FAILURE, "Invalid portmask; possible (0x%x)\n",
 			(1 << nb_ports) - 1);
+
+	/* Initialization of the driver. 8< */
 
 	/* reset l2fwd_dst_ports */
 	for (portid = 0; portid < RTE_MAX_ETHPORTS; portid++)
@@ -1042,6 +1075,7 @@ main(int argc, char **argv)
 			l2fwd_dst_ports[last_port] = last_port;
 		}
 	}
+	/* >8 End of initialization of the driver. */
 
 	rx_lcore_id = 0;
 	qconf = NULL;
@@ -1076,17 +1110,26 @@ main(int argc, char **argv)
 	nb_mbufs = RTE_MAX(nb_ports * (nb_rxd + nb_txd + MAX_PKT_BURST +
 		nb_lcores * MEMPOOL_CACHE_SIZE), 8192U);
 
-	/* create the mbuf pool */
+	/* Create the mbuf pool. 8< */
 	l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", nb_mbufs,
 		MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
 		rte_socket_id());
 	if (l2fwd_pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
+	/* >8 End of create the mbuf pool. */
+
+	/* TODO: what is this for? 8< */
+	static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
+		.name = "example_bbdev_dynfield_tsc",
+		.size = sizeof(tsc_t),
+		.align = __alignof__(tsc_t),
+	};
 
 	tsc_dynfield_offset =
 		rte_mbuf_dynfield_register(&tsc_dynfield_desc);
 	if (tsc_dynfield_offset < 0)
 		rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
+	/* >8 end TODO */
 
 	/* Initialise each port */
 	RTE_ETH_FOREACH_DEV(portid) {
@@ -1112,10 +1155,25 @@ main(int argc, char **argv)
 				"Error during getting device (port %u) info: %s\n",
 				portid, strerror(-ret));
 
+		/* Configure hardware hash 8< */
+		local_port_conf.rx_adv_conf.rss_conf.rss_hf &=
+			dev_info.flow_type_rss_offloads;
+
+		if (local_port_conf.rx_adv_conf.rss_conf.rss_hf !=
+				port_conf.rx_adv_conf.rss_conf.rss_hf) {
+			printf("Port %u modified RSS hash function based on hardware support,"
+				"requested:%#"PRIx64" configured:%#"PRIx64"\n",
+				portid,
+				port_conf.rx_adv_conf.rss_conf.rss_hf,
+				local_port_conf.rx_adv_conf.rss_conf.rss_hf);
+		}
+		/* End configure hardware hash 8< */
+
 		if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
 			local_port_conf.txmode.offloads |=
 				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
 
+		/* Configure hardware timestamps for port 8< */
 		if (!(dev_info.rx_offload_capa & DEV_RX_OFFLOAD_TIMESTAMP)) {
 			printf("\nERROR: Port %u does not support hardware timestamping\n"
 					, portid);
@@ -1127,11 +1185,14 @@ main(int argc, char **argv)
 			printf("ERROR: Failed to register timestamp field\n");
 			return -rte_errno;
 		}
+		/* 8> End of configure hardware timestamps for port */
 
+		/* Configure the number of queues for a port. */
 		ret = rte_eth_dev_configure(portid, 1, 1, &local_port_conf);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Cannot configure device: err=%d, port=%u\n",
 				  ret, portid);
+		/* >8 End of configuration of the number of queues for a port. */
 
 		ret = rte_eth_dev_adjust_nb_rx_tx_desc(portid, &nb_rxd,
 						       &nb_txd);
@@ -1151,6 +1212,7 @@ main(int argc, char **argv)
 		fflush(stdout);
 		rxq_conf = dev_info.default_rxconf;
 		rxq_conf.offloads = local_port_conf.rxmode.offloads;
+		/* RX queue setup. 8< */
 		ret = rte_eth_rx_queue_setup(portid, 0, nb_rxd,
 					     rte_eth_dev_socket_id(portid),
 					     &rxq_conf,
@@ -1158,8 +1220,9 @@ main(int argc, char **argv)
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
 				  ret, portid);
+		/* >8 End of RX queue setup. */
 
-		/* init one TX queue on each port */
+		/* Init one TX queue on each port. 8< */
 		fflush(stdout);
 		txq_conf = dev_info.default_txconf;
 		txq_conf.offloads = local_port_conf.txmode.offloads;
@@ -1169,6 +1232,7 @@ main(int argc, char **argv)
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
 				ret, portid);
+		/* >8 End of init one TX queue on each port. */
 
 		/* Initialize TX buffers */
 		tx_buffer[portid] = rte_zmalloc_socket("tx_buffer",
@@ -1201,6 +1265,7 @@ main(int argc, char **argv)
 
 		printf("done: \n");
 
+		/* Unconditionally turn on Promiscuous mode */
 		ret = rte_eth_promiscuous_enable(portid);
 		if (ret != 0)
 			rte_exit(EXIT_FAILURE,
@@ -1227,13 +1292,11 @@ main(int argc, char **argv)
 
 	check_all_ports_link_status(l2fwd_enabled_port_mask);
 
-	uint32_t i;
-	int j;
-
-	for(i=0; i< FLOW_NUM; i++)
+	/* initialize flow table 8< */
+	for(i = 0; i< FLOW_NUM; i++)
 	{
 		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
-		for(j=0; j<=2; j++)
+		for(j = 0; j <= 2; j++)
 		{
 			pkt_ctr[i].ctr[j] = 0;
 
@@ -1243,6 +1306,7 @@ main(int argc, char **argv)
 			#endif
 		}
 	}
+	/* >8 end of initialize flow table*/
 
 	ret = 0;
 	/* launch per-lcore init on every lcore */
@@ -1265,6 +1329,11 @@ main(int argc, char **argv)
 		rte_eth_dev_close(portid);
 		printf(" Done\n");
 	}
+
+	/* TODO: clarify the deletion
+	// clean up the EAL
+	rte_eal_cleanup();
+	*/
 	printf("Bye...\n");
 
 	return ret;
