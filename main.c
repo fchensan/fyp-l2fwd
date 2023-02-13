@@ -136,6 +136,9 @@ static uint64_t timer_period = 3; /* default period is 3 seconds */
 
 #define FLOW_NUM 65536
 
+#define UDP 0
+#define TCP 1
+
 struct pkt_count
 {
 	uint16_t hi_f1;
@@ -164,6 +167,8 @@ struct pkt_count
 
 	uint16_t src_port[2];
 	uint16_t dst_port[2];
+
+	unsigned char protocol[2];
 
 	#ifdef IPG
 	uint64_t ipg[2];
@@ -203,11 +208,26 @@ print_features_extracted()
 		for (bucket=0; bucket<2; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
 				count++;
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | count: %d, max packet len: %ld, min packet leng: %ld", i,
+
+				char *protocol_name;
+				switch (pkt_ctr[i].protocol[bucket]) {
+					case TCP:
+						protocol_name = "TCP";
+						break;
+					case UDP:
+						protocol_name = "UDP";
+						break;
+					default:
+						protocol_name = "?";
+						break;
+				}
+
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | count: %d, max packet len: %ld, min packet leng: %ld", i,
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].src_port[bucket],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].dst_port[bucket],
+					protocol_name,
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
 
 				#ifdef MEAN_PACKET_LEN
@@ -320,6 +340,7 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 static void
 init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr) {
 	struct rte_tcp_hdr *tcp_hdr;
+	struct rte_udp_hdr *udp_hdr;
 
 	pkt_ctr[index_l].hi_f1 = index_h;
 	pkt_ctr[index_l].ctr[bucket]++;
@@ -359,6 +380,12 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
                         tcp_hdr = (struct rte_tcp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
                         pkt_ctr[index_l].src_port[bucket] = rte_be_to_cpu_16(tcp_hdr->src_port);
                         pkt_ctr[index_l].dst_port[bucket] = rte_be_to_cpu_16(tcp_hdr->dst_port);
+			pkt_ctr[index_l].protocol[bucket] = TCP;
+		} else {
+			udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
+                        pkt_ctr[index_l].src_port[bucket] = rte_be_to_cpu_16(udp_hdr->src_port);
+                        pkt_ctr[index_l].dst_port[bucket] = rte_be_to_cpu_16(udp_hdr->dst_port);
+			pkt_ctr[index_l].protocol[bucket] = UDP;
 		}
 	}
 
