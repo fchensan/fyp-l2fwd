@@ -286,7 +286,7 @@ l2fwd_mac_updating(struct rte_mbuf *m, unsigned dest_portid)
 
 	/* 02:00:00:00:00:xx */
 	tmp = &eth->d_addr.addr_bytes[0];
-	
+
 	#ifdef OVERRIDE_DST_MAC
 	*((uint64_t *)tmp) = 0x000000000002 + ((uint64_t)dest_portid << 40);
 	#else
@@ -994,7 +994,6 @@ print_welcome(void)
 	       "/____/_/ /_/ /_/\\__,_/_/   \\__/_/ |_/___/\\____/  /_/  |_/_/ /_/\\__,_/_/\\__, /\\__/_/\\___/____/  \n"
 	       "                                                                      /____/                   \n");
 }
-
 
 static void
 signal_handler(int signum)
