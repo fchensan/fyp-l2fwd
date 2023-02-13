@@ -47,6 +47,7 @@ static int mac_updating = 1;
 
 /* Run analytics (disabled by default for debugging and benchmarking) */
 static int enable_analytics = 0;
+#define OVERRIDE_DST_MAC 0x4c8aa4a1420c;
 
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
@@ -285,7 +286,12 @@ l2fwd_mac_updating(struct rte_mbuf *m, unsigned dest_portid)
 
 	/* 02:00:00:00:00:xx */
 	tmp = &eth->d_addr.addr_bytes[0];
+	
+	#ifdef OVERRIDE_DST_MAC
 	*((uint64_t *)tmp) = 0x000000000002 + ((uint64_t)dest_portid << 40);
+	#else
+	*((uint64_t *)tmp) = OVERRIDE_DST_MAC;
+	#endif
 
 	/* src addr */
 	rte_ether_addr_copy(&l2fwd_ports_eth_addr[dest_portid], &eth->s_addr);
