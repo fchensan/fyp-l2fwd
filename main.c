@@ -108,11 +108,11 @@ static struct rte_eth_conf port_conf = {
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
-			/* Use a random hash key for hash function. */
+			/* Use the default hash key for hash function. */
 			.rss_key = NULL,
-			/* Use 5-tuple (src and dst IP addresses, src and dst ports
-			 * and the transport protocol UDP/TCP) to form flow hash */
-			.rss_hf = ETH_RSS_IP | ETH_RSS_UDP | ETH_RSS_TCP //ETH_RSS_PROTO_MASK,
+			/* Use 4-tuple (src and dst IP addresses, src and dst ports to form flow 
+			 * hash */
+			.rss_hf = ETH_RSS_IP | ETH_RSS_UDP | ETH_RSS_TCP,
 		}
 	},
 	.txmode = {
