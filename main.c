@@ -313,9 +313,9 @@ l2fwd_mac_updating(struct rte_mbuf *m, unsigned dest_portid)
 	tmp = &eth->d_addr.addr_bytes[0];
 
 	#ifdef OVERRIDE_DST_MAC
-	*((uint64_t *)tmp) = 0x000000000002 + ((uint64_t)dest_portid << 40);
-	#else
 	*((uint64_t *)tmp) = OVERRIDE_DST_MAC;
+	#else
+	*((uint64_t *)tmp) = 0x000000000002 + ((uint64_t)dest_portid << 40);
 	#endif
 
 	/* src addr */
