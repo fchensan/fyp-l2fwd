@@ -153,6 +153,7 @@ struct pkt_count
 	double variance_packet_len[2];
 	#endif
 
+	uint64_t first_seen[2];
 	uint64_t last_seen[2];
 	uint64_t min_interarrival_time[2];
 	uint64_t max_interarrival_time[2];
@@ -222,12 +223,13 @@ print_features_extracted()
 						break;
 				}
 
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | count: %d, max packet len: %ld, min packet leng: %ld", i,
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | first seen: %ld | count: %d, max packet len: %ld, min packet leng: %ld", i,
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].src_port[bucket],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].dst_port[bucket],
 					protocol_name,
+					pkt_ctr[i].first_seen[bucket],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
 
 				#ifdef MEAN_PACKET_LEN
@@ -354,6 +356,7 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 	#endif
 
 	uint64_t now = *hwts_field(m);
+	pkt_ctr[index_l].first_seen[bucket] = now;
 	pkt_ctr[index_l].last_seen[bucket] = now;
 	pkt_ctr[index_l].max_interarrival_time[bucket] = 0;
 	pkt_ctr[index_l].min_interarrival_time[bucket] = 0xFFFFFFFF;
