@@ -139,6 +139,9 @@ static uint64_t timer_period = 3; /* default period is 3 seconds */
 #define UDP 0
 #define TCP 1
 
+#define MEAN_IAT_TIME
+#define MEAN_PACKET_LEN
+
 struct pkt_count
 {
 	uint16_t hi_f1;
