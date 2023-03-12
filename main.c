@@ -142,42 +142,46 @@ static uint64_t timer_period = 3; /* default period is 3 seconds */
 #define MEAN_IAT_TIME
 #define MEAN_PACKET_LEN
 
+#define SLOTS 1
+
 struct pkt_count
 {
 	uint16_t hi_f1;
 	uint16_t hi_f2;
-	uint32_t ctr[3];
+	uint32_t ctr[SLOTS+1];
 
-	uint64_t max_packet_len[2];
-	uint64_t min_packet_len[2];
+	uint64_t max_packet_len[SLOTS];
+	uint64_t min_packet_len[SLOTS];
 
 	#ifdef MEAN_PACKET_LEN
-	double mean_packet_len[2];
-	double variance_packet_len[2];
+	double mean_packet_len[SLOTS];
+	double variance_packet_len[SLOTS];
 	#endif
 
-	uint64_t first_seen[2];
-	uint64_t last_seen[2];
-	uint64_t min_interarrival_time[2];
-	uint64_t max_interarrival_time[2];
+	uint64_t first_seen[SLOTS];
+	uint64_t last_seen[SLOTS];
+	uint64_t min_interarrival_time[SLOTS];
+	uint64_t max_interarrival_time[SLOTS];
 
 	#ifdef MEAN_IAT_TIME
-	double mean_interarrival_time[2];
-	double variance_interarrival_time[2];
+	double mean_interarrival_time[SLOTS];
+	double variance_interarrival_time[SLOTS];
 	#endif
 
-	unsigned char ip_src[2][4];
-	unsigned char ip_dst[2][4];
+	unsigned char ip_src[SLOTS][4];
+	unsigned char ip_dst[SLOTS][4];
 
-	uint16_t src_port[2];
-	uint16_t dst_port[2];
+	uint16_t src_port[SLOTS];
+	uint16_t dst_port[SLOTS];
 
-	unsigned char protocol[2];
+	unsigned char protocol[SLOTS];
 
 	#ifdef IPG
-	uint64_t ipg[2];
-	double avg[2];
+	uint64_t ipg[SLOTS];
+	double avg[SLOTS];
 	#endif
+
+	bool expired[SLOTS];
 
 } __rte_cache_aligned;
 
@@ -209,10 +213,10 @@ print_features_extracted()
 	int count = 0;
 	for(i=0; i< FLOW_NUM; i++)
 	{
-		for (bucket=0; bucket<2; bucket++) {
+		for (bucket=0; bucket<SLOTS; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
 				count++;
-
+				// continue;
 				char *protocol_name;
 				switch (pkt_ctr[i].protocol[bucket]) {
 					case TCP:
@@ -224,6 +228,10 @@ print_features_extracted()
 					default:
 						protocol_name = "?";
 						break;
+				}
+
+				if (pkt_ctr[i].expired[bucket]) {
+					printf("[Expired] ");
 				}
 
 				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | first seen: %ld | count: %d, max packet len: %ld, min packet leng: %ld", i,
@@ -562,10 +570,26 @@ perform_analytics(struct rte_mbuf *m)
 			#endif
 		}
 		else
-			pkt_ctr[index_l].ctr[2]++;
+			pkt_ctr[index_l].ctr[SLOTS+1]++;
 	}
 }
 
+static void
+mark_expired_flows()
+{
+	int i, bucket;
+	int count = 0;
+	for(i=0; i< FLOW_NUM; i++)
+	{
+		for (bucket=0; bucket<SLOTS; bucket++) {
+			if (pkt_ctr[i].ctr[bucket] > 0) {
+				if (pkt_ctr[i].last_seen[bucket] - pkt_ctr[i].first_seen[bucket] > 234658398*5) {
+					pkt_ctr[i].expired[bucket] = true;
+				}
+			}
+		}
+	}
+}
 
 /* main processing loop */
 static void
@@ -637,6 +661,7 @@ l2fwd_main_loop(void)
 					/* do this only on main core */
 					if (lcore_id == rte_get_main_lcore()) {
 						print_stats();
+						mark_expired_flows();
 						/* reset the timer */
 						timer_tsc = 0;
 					}
@@ -1348,7 +1373,7 @@ main(int argc, char **argv)
 	for(i = 0; i< FLOW_NUM; i++)
 	{
 		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
-		for(j = 0; j <= 2; j++)
+		for(j = 0; j <= SLOTS; j++)
 		{
 			pkt_ctr[i].ctr[j] = 0;
 
