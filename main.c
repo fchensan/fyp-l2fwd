@@ -169,6 +169,8 @@ struct pkt_count
 
 	unsigned char protocol[SLOTS];
 
+	uint16_t tcp_flags[SLOTS][8];
+
 	// bool expired[SLOTS];
 
 } __rte_cache_aligned;
@@ -284,6 +286,13 @@ print_features_extracted()
 					protocol_name,
 					pkt_ctr[i].first_seen[bucket],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
+
+				printf("tcp flags counts: %d %d %d %d %d %d %d %d", 
+					pkt_ctr[i].tcp_flags[bucket][0], pkt_ctr[i].tcp_flags[bucket][1],
+					pkt_ctr[i].tcp_flags[bucket][2], pkt_ctr[i].tcp_flags[bucket][3],
+					pkt_ctr[i].tcp_flags[bucket][4], pkt_ctr[i].tcp_flags[bucket][5],
+					pkt_ctr[i].tcp_flags[bucket][6], pkt_ctr[i].tcp_flags[bucket][7]
+					);
 
 				printf("mean packet len: %f, variance packet len: %f", pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket]);
 
@@ -429,6 +438,14 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
                         pkt_ctr[index_l].src_port[bucket] = rte_be_to_cpu_16(tcp_hdr->src_port);
                         pkt_ctr[index_l].dst_port[bucket] = rte_be_to_cpu_16(tcp_hdr->dst_port);
 			pkt_ctr[index_l].protocol[bucket] = TCP;
+			pkt_ctr[index_l].tcp_flags[bucket][0] += (tcp_hdr->tcp_flags) & 0b00000001;
+			pkt_ctr[index_l].tcp_flags[bucket][1] += (tcp_hdr->tcp_flags) & 0b00000010;
+			pkt_ctr[index_l].tcp_flags[bucket][2] += (tcp_hdr->tcp_flags) & 0b00000100;
+			pkt_ctr[index_l].tcp_flags[bucket][3] += (tcp_hdr->tcp_flags) & 0b00001000;
+			pkt_ctr[index_l].tcp_flags[bucket][4] += (tcp_hdr->tcp_flags) & 0b00010000;
+			pkt_ctr[index_l].tcp_flags[bucket][5] += (tcp_hdr->tcp_flags) & 0b00100000;
+			pkt_ctr[index_l].tcp_flags[bucket][6] += (tcp_hdr->tcp_flags) & 0b01000000;
+			pkt_ctr[index_l].tcp_flags[bucket][7] += (tcp_hdr->tcp_flags) & 0b10000000;
 		} else {
 			udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
                         pkt_ctr[index_l].src_port[bucket] = rte_be_to_cpu_16(udp_hdr->src_port);
@@ -444,23 +461,9 @@ perform_analytics(struct rte_mbuf *m)
 
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
-	// struct rte_ipv6_hdr *ipv6_hdr;
-	// struct rte_tcp_hdr *tcp_hdr;
-	// struct rte_udp_hdr *udp_hdr;
 	uint64_t l2_len;
 	uint64_t l3_len;
-	// uint64_t l4_len;
 	uint64_t packet_len = 0;
-	// uint64_t content_len;
-	// uint8_t *content;
-	uint16_t src_port;
-	uint16_t dst_port;
-	// uint32_t seq;
-	// uint32_t ack;
-	// char str[64] = {};
-	// char hash_value[64] = {};
-	// int diff = 0;
-	// bool recalc_checksum = false;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
 	l2_len = sizeof(struct rte_ether_hdr);
@@ -468,8 +471,7 @@ perform_analytics(struct rte_mbuf *m)
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 		ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
 		l3_len = sizeof(struct rte_ipv4_hdr);
-		// packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
-		packet_len = rte_pktmbuf_pkt_len(m);
+		packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
 	}
 
 	uint32_t index_h, index_l;
@@ -520,7 +522,19 @@ perform_analytics(struct rte_mbuf *m)
 			pkt_ctr[index_l].variance_interarrival_time[0] = (
 				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
 				) / pkt_ctr[index_l].ctr[0];
-		}
+
+			if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
+				struct rte_tcp_hdr *tcp_hdr = (struct rte_tcp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
+				pkt_ctr[index_l].tcp_flags[0][0] += (tcp_hdr->tcp_flags) & 0b00000001;
+				pkt_ctr[index_l].tcp_flags[0][1] += (tcp_hdr->tcp_flags) & 0b00000010;
+				pkt_ctr[index_l].tcp_flags[0][2] += (tcp_hdr->tcp_flags) & 0b00000100;
+				pkt_ctr[index_l].tcp_flags[0][3] += (tcp_hdr->tcp_flags) & 0b00001000;
+				pkt_ctr[index_l].tcp_flags[0][4] += (tcp_hdr->tcp_flags) & 0b00010000;
+				pkt_ctr[index_l].tcp_flags[0][5] += (tcp_hdr->tcp_flags) & 0b00100000;
+				pkt_ctr[index_l].tcp_flags[0][6] += (tcp_hdr->tcp_flags) & 0b01000000;
+				pkt_ctr[index_l].tcp_flags[0][7] += (tcp_hdr->tcp_flags) & 0b10000000;
+			}
+		} 
 		else
 			pkt_ctr[index_l].ctr[SLOTS+1]++;
 	}
