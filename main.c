@@ -169,7 +169,7 @@ struct pkt_count
 
 	unsigned char protocol[SLOTS];
 
-	bool expired[SLOTS];
+	// bool expired[SLOTS];
 
 } __rte_cache_aligned;
 
@@ -272,9 +272,9 @@ print_features_extracted()
 						break;
 				}
 
-				if (pkt_ctr[i].expired[bucket]) {
-					printf("[Expired] ");
-				}
+				// if (pkt_ctr[i].expired[bucket]) {
+				// 	printf("[Expired] ");
+				// }
 
 				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | first seen: %ld | count: %d, max packet len: %ld, min packet leng: %ld", i,
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
@@ -526,22 +526,22 @@ perform_analytics(struct rte_mbuf *m)
 	}
 }
 
-static void
-mark_expired_flows()
-{
-	int i, bucket;
-	int count = 0;
-	for(i=0; i< FLOW_NUM; i++)
-	{
-		for (bucket=0; bucket<SLOTS; bucket++) {
-			if (pkt_ctr[i].ctr[bucket] > 0) {
-				if (pkt_ctr[i].last_seen[bucket] - pkt_ctr[i].first_seen[bucket] > 234658398*5) {
-					pkt_ctr[i].expired[bucket] = true;
-				}
-			}
-		}
-	}
-}
+// static void
+// mark_expired_flows()
+// {
+// 	int i, bucket;
+// 	int count = 0;
+// 	for(i=0; i< FLOW_NUM; i++)
+// 	{
+// 		for (bucket=0; bucket<SLOTS; bucket++) {
+// 			if (pkt_ctr[i].ctr[bucket] > 0) {
+// 				if (pkt_ctr[i].last_seen[bucket] - pkt_ctr[i].first_seen[bucket] > 234658398*5) {
+// 					pkt_ctr[i].expired[bucket] = true;
+// 				}
+// 			}
+// 		}
+// 	}
+// }
 
 /* main processing loop */
 static void
@@ -613,7 +613,7 @@ l2fwd_main_loop(void)
 					/* do this only on main core */
 					if (lcore_id == rte_get_main_lcore()) {
 						print_stats();
-						mark_expired_flows();
+						// mark_expired_flows();
 						/* reset the timer */
 						timer_tsc = 0;
 					}
