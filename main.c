@@ -139,9 +139,6 @@ static uint64_t timer_period = 3; /* default period is 3 seconds */
 #define UDP 0
 #define TCP 1
 
-#define MEAN_IAT_TIME
-#define MEAN_PACKET_LEN
-
 #define SLOTS 1
 
 struct pkt_count
@@ -153,20 +150,16 @@ struct pkt_count
 	uint64_t max_packet_len[SLOTS];
 	uint64_t min_packet_len[SLOTS];
 
-	#ifdef MEAN_PACKET_LEN
 	double mean_packet_len[SLOTS];
 	double variance_packet_len[SLOTS];
-	#endif
 
 	uint64_t first_seen[SLOTS];
 	uint64_t last_seen[SLOTS];
 	uint64_t min_interarrival_time[SLOTS];
 	uint64_t max_interarrival_time[SLOTS];
 
-	#ifdef MEAN_IAT_TIME
 	double mean_interarrival_time[SLOTS];
 	double variance_interarrival_time[SLOTS];
-	#endif
 
 	unsigned char ip_src[SLOTS][4];
 	unsigned char ip_dst[SLOTS][4];
@@ -175,11 +168,6 @@ struct pkt_count
 	uint16_t dst_port[SLOTS];
 
 	unsigned char protocol[SLOTS];
-
-	#ifdef IPG
-	uint64_t ipg[SLOTS];
-	double avg[SLOTS];
-	#endif
 
 	bool expired[SLOTS];
 
@@ -297,13 +285,9 @@ print_features_extracted()
 					pkt_ctr[i].first_seen[bucket],
 					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
 
-				#ifdef MEAN_PACKET_LEN
 				printf("mean packet len: %f, variance packet len: %f", pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket]);
-				#endif
 
-				#ifdef MEAN_IAT_TIME
 				printf("mean interarrival time: %f, variance interarrival time: %f", pkt_ctr[i].mean_interarrival_time[bucket], pkt_ctr[i].variance_interarrival_time[bucket]);
-				#endif
 
 				printf("\n");
 			}
@@ -415,10 +399,8 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 	pkt_ctr[index_l].max_packet_len[bucket] = packet_len;
 	pkt_ctr[index_l].min_packet_len[bucket] = packet_len;
 
-	#ifdef MEAN_PACKET_LEN
 	pkt_ctr[index_l].mean_packet_len[bucket] = packet_len;
 	pkt_ctr[index_l].variance_packet_len[bucket] = 0;
-	#endif
 
 	uint64_t now = *hwts_field(m);
 	pkt_ctr[index_l].first_seen[bucket] = now;
@@ -426,10 +408,8 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 	pkt_ctr[index_l].max_interarrival_time[bucket] = 0;
 	pkt_ctr[index_l].min_interarrival_time[bucket] = 0xFFFFFFFF;
 
-	#ifdef MEAN_IAT_TIME
 	pkt_ctr[index_l].mean_interarrival_time[bucket] = 0;
 	pkt_ctr[index_l].variance_interarrival_time[bucket] = 0;
-	#endif
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr),
@@ -456,10 +436,6 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 			pkt_ctr[index_l].protocol[bucket] = UDP;
 		}
 	}
-
-	#ifdef IPG
-	pkt_ctr[index].avg[bucket] = pkt_ctr[index].ipg[bucket];
-	#endif
 }
 
 static void
@@ -501,20 +477,10 @@ perform_analytics(struct rte_mbuf *m)
 	index_l = m->hash.rss & 0xffff;
 	index_h = (m->hash.rss & 0xffff0000)>>16;
 
-	#ifdef TIMESTAMP
-	uint64_t timestamp = m->timestamp;
-	RTE_SET_USED(timestamp);
-	#endif
-
-	// rte_pktmbuf_free(m);
 	if(pkt_ctr[index_l].hi_f1 == 0)
 	{
 		init_counters(index_l, index_h, 0, m, packet_len, ipv4_hdr);
-	}
-	else if(pkt_ctr[index_l].hi_f2 == 0 && pkt_ctr[index_l].hi_f1 != index_h)
-	{
-		init_counters(index_l, index_h, 1, m, packet_len, ipv4_hdr);
-	}
+	} 
 	else
 	{
 		if(pkt_ctr[index_l].hi_f1 == index_h)
@@ -527,19 +493,16 @@ perform_analytics(struct rte_mbuf *m)
 			if (pkt_ctr[index_l].min_packet_len[0] > packet_len)
 			 	pkt_ctr[index_l].min_packet_len[0] = packet_len;
 
-			#ifdef MEAN_PACKET_LEN
 			double old_mean = pkt_ctr[index_l].mean_packet_len[0];
 			pkt_ctr[index_l].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[0];
 			pkt_ctr[index_l].variance_packet_len[0] = (
 				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0])
 				) / pkt_ctr[index_l].ctr[0];
-			#endif
 
 			uint64_t now = *hwts_field(m);
 
 			uint64_t delta = now - pkt_ctr[index_l].last_seen[0];
 			pkt_ctr[index_l].last_seen[0] = now;
-
 
 			if (pkt_ctr[index_l].max_interarrival_time[0] < delta)
 			 	pkt_ctr[index_l].max_interarrival_time[0] = delta;
@@ -547,7 +510,6 @@ perform_analytics(struct rte_mbuf *m)
 			if (pkt_ctr[index_l].min_interarrival_time[0] > delta)
 			 	pkt_ctr[index_l].min_interarrival_time[0] = delta;
 
-			#ifdef MEAN_IAT_TIME
 			double old_variance_mean = pkt_ctr[index_l].mean_interarrival_time[0];
 
 			if (pkt_ctr[index_l].mean_interarrival_time[0] == 0)
@@ -558,70 +520,6 @@ perform_analytics(struct rte_mbuf *m)
 			pkt_ctr[index_l].variance_interarrival_time[0] = (
 				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
 				) / pkt_ctr[index_l].ctr[0];
-			#endif
-
-			#ifdef IPG
-			curr = global - 1 - pkt_ctr[index_l].ipg[0];
-
-			pkt_ctr[index_l].avg[0] =
-				(pkt_ctr[index_l].avg[0] * (pkt_ctr[index_l].ctr[0] - 1) + curr)/pkt_ctr[index_l].ctr[0];
-
-			//if (pkt_ctr[index_l].ctr[0] < 10000 && index_l == 65246)
-			//	printf("%lf %lu %ld\n", pkt_ctr[index_l].avg[0], pkt_ctr[index_l].ctr[0], curr);
-
-			pkt_ctr[index_l].ipg[0] = global;
-			#endif
-		}
-		else if(pkt_ctr[index_l].hi_f2 == index_h)
-		{
-			pkt_ctr[index_l].ctr[1]++;
-
-			if (pkt_ctr[index_l].max_packet_len[1] < packet_len)
-			 	pkt_ctr[index_l].max_packet_len[1] = packet_len;
-
-			if (pkt_ctr[index_l].min_packet_len[1] > packet_len)
-			 	pkt_ctr[index_l].min_packet_len[1] = packet_len;
-
-			#ifdef MEAN_PACKET_LEN
-			double old_mean = pkt_ctr[index_l].mean_packet_len[1];
-			pkt_ctr[index_l].mean_packet_len[1] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[1];
-			pkt_ctr[index_l].variance_packet_len[0] = (
-				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0])
-				) / pkt_ctr[index_l].ctr[0];
-			#endif
-
-			uint64_t now = *hwts_field(m);
-
-			uint64_t delta = now - pkt_ctr[index_l].last_seen[1];
-			pkt_ctr[index_l].last_seen[1] = now;
-
-
-			if (pkt_ctr[index_l].max_interarrival_time[1] < delta)
-			 	pkt_ctr[index_l].max_interarrival_time[1] = delta;
-
-			if (pkt_ctr[index_l].min_interarrival_time[1] > delta)
-			 	pkt_ctr[index_l].min_interarrival_time[1] = delta;
-
-
-			#ifdef MEAN_IAT_TIME
-			double old_variance_mean = pkt_ctr[index_l].mean_interarrival_time[1];
-			if (pkt_ctr[index_l].mean_interarrival_time[1] == 0)
-				pkt_ctr[index_l].mean_interarrival_time[1] = delta;
-			else
-				pkt_ctr[index_l].mean_interarrival_time[1] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[1] - 1);
-
-			pkt_ctr[index_l].variance_interarrival_time[1] = (
-				(pkt_ctr[index_l].ctr[1] - 1) * pkt_ctr[index_l].variance_interarrival_time[1] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[1])
-				) / pkt_ctr[index_l].ctr[1];
-			#endif
-
-			#ifdef IPG
-				curr = global - 1 - pkt_ctr[index_l].ipg[1];
-			pkt_ctr[index_l].avg[1] =
-				((pkt_ctr[index_l].avg[1] * (pkt_ctr[index_l].ctr[1] - 1)) + curr)/(float)pkt_ctr[index_l].ctr[1];
-
-			pkt_ctr[index_l].ipg[1] = global;
-			#endif
 		}
 		else
 			pkt_ctr[index_l].ctr[SLOTS+1]++;
@@ -1434,11 +1332,6 @@ main(int argc, char **argv)
 		for(j = 0; j <= SLOTS; j++)
 		{
 			pkt_ctr[i].ctr[j] = 0;
-
-			#ifdef IPG
-			if (j == 2) break;
-			pkt_ctr[i].avg[j] = pkt_ctr[i].ipg[j] = 0;
-			#endif
 		}
 	}
 	/* >8 end of initialize flow table*/
