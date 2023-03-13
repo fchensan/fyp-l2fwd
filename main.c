@@ -147,20 +147,6 @@ struct pkt_count
 	uint16_t hi_f2;
 	uint32_t ctr[SLOTS+1];
 
-	uint64_t max_packet_len[SLOTS];
-	uint64_t min_packet_len[SLOTS];
-
-	double mean_packet_len[SLOTS];
-	double variance_packet_len[SLOTS];
-
-	uint64_t first_seen[SLOTS];
-	uint64_t last_seen[SLOTS];
-	uint64_t min_interarrival_time[SLOTS];
-	uint64_t max_interarrival_time[SLOTS];
-
-	double mean_interarrival_time[SLOTS];
-	double variance_interarrival_time[SLOTS];
-
 	unsigned char ip_src[SLOTS][4];
 	unsigned char ip_dst[SLOTS][4];
 
@@ -168,9 +154,6 @@ struct pkt_count
 	uint16_t dst_port[SLOTS];
 
 	unsigned char protocol[SLOTS];
-
-	bool expired[SLOTS];
-
 } __rte_cache_aligned;
 
 static struct pkt_count pkt_ctr[FLOW_NUM] __rte_cache_aligned;
@@ -272,22 +255,13 @@ print_features_extracted()
 						break;
 				}
 
-				if (pkt_ctr[i].expired[bucket]) {
-					printf("[Expired] ");
-				}
-
-				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | first seen: %ld | count: %d, max packet len: %ld, min packet leng: %ld", i,
+				printf("Flow %d | %hhu.%hhu.%hhu.%hhu (%d) --> %hhu.%hhu.%hhu.%hhu (%d) | %s | count: %d", i,
 					pkt_ctr[i].ip_src[bucket][0],pkt_ctr[i].ip_src[bucket][1],pkt_ctr[i].ip_src[bucket][2],pkt_ctr[i].ip_src[bucket][3],
 					pkt_ctr[i].src_port[bucket],
 					pkt_ctr[i].ip_dst[bucket][0],pkt_ctr[i].ip_dst[bucket][1],pkt_ctr[i].ip_dst[bucket][2],pkt_ctr[i].ip_dst[bucket][3],
 					pkt_ctr[i].dst_port[bucket],
 					protocol_name,
-					pkt_ctr[i].first_seen[bucket],
-					pkt_ctr[i].ctr[bucket], pkt_ctr[i].max_packet_len[bucket], pkt_ctr[i].min_packet_len[bucket]);
-
-				printf("mean packet len: %f, variance packet len: %f", pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket]);
-
-				printf("mean interarrival time: %f, variance interarrival time: %f", pkt_ctr[i].mean_interarrival_time[bucket], pkt_ctr[i].variance_interarrival_time[bucket]);
+					pkt_ctr[i].ctr[bucket]);
 
 				printf("\n");
 			}
@@ -389,27 +363,12 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 /* >8 End of simple forward. */
 
 static void
-init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr) {
+init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, struct rte_ipv4_hdr *ipv4_hdr) {
 	struct rte_tcp_hdr *tcp_hdr;
 	struct rte_udp_hdr *udp_hdr;
 
 	pkt_ctr[index_l].hi_f1 = index_h;
 	pkt_ctr[index_l].ctr[bucket]++;
-
-	pkt_ctr[index_l].max_packet_len[bucket] = packet_len;
-	pkt_ctr[index_l].min_packet_len[bucket] = packet_len;
-
-	pkt_ctr[index_l].mean_packet_len[bucket] = packet_len;
-	pkt_ctr[index_l].variance_packet_len[bucket] = 0;
-
-	uint64_t now = *hwts_field(m);
-	pkt_ctr[index_l].first_seen[bucket] = now;
-	pkt_ctr[index_l].last_seen[bucket] = now;
-	pkt_ctr[index_l].max_interarrival_time[bucket] = 0;
-	pkt_ctr[index_l].min_interarrival_time[bucket] = 0xFFFFFFFF;
-
-	pkt_ctr[index_l].mean_interarrival_time[bucket] = 0;
-	pkt_ctr[index_l].variance_interarrival_time[bucket] = 0;
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr),
@@ -441,37 +400,6 @@ init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mb
 static void
 perform_analytics(struct rte_mbuf *m)
 {
-
-	struct rte_ether_hdr *eth_hdr;
-	struct rte_ipv4_hdr *ipv4_hdr;
-	// struct rte_ipv6_hdr *ipv6_hdr;
-	// struct rte_tcp_hdr *tcp_hdr;
-	// struct rte_udp_hdr *udp_hdr;
-	uint64_t l2_len;
-	uint64_t l3_len;
-	// uint64_t l4_len;
-	uint64_t packet_len = 0;
-	// uint64_t content_len;
-	// uint8_t *content;
-	uint16_t src_port;
-	uint16_t dst_port;
-	// uint32_t seq;
-	// uint32_t ack;
-	// char str[64] = {};
-	// char hash_value[64] = {};
-	// int diff = 0;
-	// bool recalc_checksum = false;
-
-	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
-	l2_len = sizeof(struct rte_ether_hdr);
-
-	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-		ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-		l3_len = sizeof(struct rte_ipv4_hdr);
-		// packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
-		packet_len = rte_pktmbuf_pkt_len(m);
-	}
-
 	uint32_t index_h, index_l;
 
 	index_l = m->hash.rss & 0xffff;
@@ -479,69 +407,27 @@ perform_analytics(struct rte_mbuf *m)
 
 	if(pkt_ctr[index_l].hi_f1 == 0)
 	{
-		init_counters(index_l, index_h, 0, m, packet_len, ipv4_hdr);
+		struct rte_ether_hdr *eth_hdr;
+		struct rte_ipv4_hdr *ipv4_hdr;
+
+		eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+
+		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+			ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+		}
+		init_counters(index_l, index_h, 0, m, ipv4_hdr);
 	} 
 	else
 	{
 		if(pkt_ctr[index_l].hi_f1 == index_h)
 		{
 			pkt_ctr[index_l].ctr[0]++;
-
-			if (pkt_ctr[index_l].max_packet_len[0] < packet_len)
-				pkt_ctr[index_l].max_packet_len[0] = packet_len;
-
-			if (pkt_ctr[index_l].min_packet_len[0] > packet_len)
-			 	pkt_ctr[index_l].min_packet_len[0] = packet_len;
-
-			double old_mean = pkt_ctr[index_l].mean_packet_len[0];
-			pkt_ctr[index_l].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[0];
-			pkt_ctr[index_l].variance_packet_len[0] = (
-				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0])
-				) / pkt_ctr[index_l].ctr[0];
-
-			uint64_t now = *hwts_field(m);
-
-			uint64_t delta = now - pkt_ctr[index_l].last_seen[0];
-			pkt_ctr[index_l].last_seen[0] = now;
-
-			if (pkt_ctr[index_l].max_interarrival_time[0] < delta)
-			 	pkt_ctr[index_l].max_interarrival_time[0] = delta;
-
-			if (pkt_ctr[index_l].min_interarrival_time[0] > delta)
-			 	pkt_ctr[index_l].min_interarrival_time[0] = delta;
-
-			double old_variance_mean = pkt_ctr[index_l].mean_interarrival_time[0];
-
-			if (pkt_ctr[index_l].mean_interarrival_time[0] == 0)
-				pkt_ctr[index_l].mean_interarrival_time[0] = delta;
-			else
-				pkt_ctr[index_l].mean_interarrival_time[0] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[0] - 1);
-
-			pkt_ctr[index_l].variance_interarrival_time[0] = (
-				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
-				) / pkt_ctr[index_l].ctr[0];
 		}
 		else
 			pkt_ctr[index_l].ctr[SLOTS+1]++;
 	}
 }
 
-static void
-mark_expired_flows()
-{
-	int i, bucket;
-	int count = 0;
-	for(i=0; i< FLOW_NUM; i++)
-	{
-		for (bucket=0; bucket<SLOTS; bucket++) {
-			if (pkt_ctr[i].ctr[bucket] > 0) {
-				if (pkt_ctr[i].last_seen[bucket] - pkt_ctr[i].first_seen[bucket] > 234658398*5) {
-					pkt_ctr[i].expired[bucket] = true;
-				}
-			}
-		}
-	}
-}
 
 /* main processing loop */
 static void
@@ -613,7 +499,6 @@ l2fwd_main_loop(void)
 					/* do this only on main core */
 					if (lcore_id == rte_get_main_lcore()) {
 						print_stats();
-						mark_expired_flows();
 						/* reset the timer */
 						timer_tsc = 0;
 					}
