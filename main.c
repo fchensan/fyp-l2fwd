@@ -196,8 +196,62 @@ hwts_field(struct rte_mbuf *mbuf)
 			hwts_dynfield_offset, rte_mbuf_timestamp_t *);
 }
 
+/* Dynfield for software timestamp. 8< */
 typedef uint64_t tsc_t;
 static int tsc_dynfield_offset = -1;
+
+static inline tsc_t *
+tsc_field(struct rte_mbuf *mbuf)
+{
+	return RTE_MBUF_DYNFIELD(mbuf, tsc_dynfield_offset, tsc_t *);
+}
+/* >8 End of dynfield for software timestamp. */
+
+static struct {
+	uint64_t total_cycles;
+	uint64_t total_queue_cycles;
+	uint64_t total_pkts;
+} latency_numbers;
+
+static uint64_t latest_latency;
+
+static uint16_t
+add_timestamps(uint16_t port __rte_unused, uint16_t qidx __rte_unused,
+		struct rte_mbuf **pkts, uint16_t nb_pkts,
+		uint16_t max_pkts __rte_unused, void *_ __rte_unused)
+{
+	unsigned i;
+	uint64_t now = rte_rdtsc();
+
+	for (i = 0; i < nb_pkts; i++)
+		*tsc_field(pkts[i]) = now;
+	return nb_pkts;
+}
+
+static uint16_t
+calc_latency(uint16_t port, uint16_t qidx __rte_unused,
+		struct rte_mbuf **pkts, uint16_t nb_pkts, void *_ __rte_unused)
+{
+	uint64_t cycles = 0;
+	uint64_t queue_ticks = 0;
+	uint64_t now = rte_rdtsc();
+	uint64_t ticks;
+	unsigned i;
+
+	for (i = 0; i < nb_pkts; i++) {
+		cycles += now - *tsc_field(pkts[i]);
+	}
+
+	latency_numbers.total_cycles += cycles;
+	latency_numbers.total_pkts += nb_pkts;
+
+	if (latency_numbers.total_pkts > (100 * 100 * 1000ULL)) {
+		latest_latency = latency_numbers.total_cycles / latency_numbers.total_pkts;
+		latency_numbers.total_cycles = 0;
+		latency_numbers.total_pkts = 0;
+	}
+	return nb_pkts;
+}
 
 #define uint32_t_to_char(ip, a, b, c, d) do {\
     *a = (unsigned char)(ip >> 24 & 0xff);\
@@ -305,7 +359,7 @@ print_stats(void)
 
 	if (enable_analytics)
 		print_features_extracted();
-
+	printf("Average packet latency (cycles): %ld", latest_latency);
 	fflush(stdout);
 }
 
@@ -1357,6 +1411,10 @@ main(int argc, char **argv)
 				l2fwd_ports_eth_addr[portid].addr_bytes[3],
 				l2fwd_ports_eth_addr[portid].addr_bytes[4],
 				l2fwd_ports_eth_addr[portid].addr_bytes[5]);
+
+		/* Add callbacks for software timestamping for performance analysis. */
+		rte_eth_add_rx_callback(portid, 0, add_timestamps, NULL);
+		rte_eth_add_tx_callback(portid, 0, calc_latency, NULL);
 
 		/* initialize port stats */
 		memset(&port_statistics, 0, sizeof(port_statistics));
