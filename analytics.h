@@ -61,6 +61,9 @@ struct pkt_count pkt_ctr[FLOW_NUM] __rte_cache_aligned;
 
 void print_features_extracted();
 
+uint32_t get_index(struct rte_mbuf *m);
+uint32_t get_tag(struct rte_mbuf *m);
+
 void init_counters(uint16_t index_l, uint16_t index_h, 
 	uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr);
 

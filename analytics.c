@@ -50,6 +50,14 @@ print_features_extracted()
 	printf("Total flows: %d\n", count);
 }
 
+uint32_t get_index(struct rte_mbuf *m) {
+	return m->hash.rss & 0xffff;
+}
+
+uint32_t get_tag(struct rte_mbuf *m) {
+	return (m->hash.rss & 0xffff0000)>>16;
+}
+
 void
 init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr) {
 	struct rte_tcp_hdr *tcp_hdr;
@@ -136,8 +144,8 @@ perform_analytics(struct rte_mbuf *m)
 
 	uint32_t index_h, index_l;
 
-	index_l = m->hash.rss & 0xffff;
-	index_h = (m->hash.rss & 0xffff0000)>>16;
+	index_l = get_index(m);
+	index_h = get_tag(m);
 
 	if(pkt_ctr[index_l].hi_f1 == 0)
 	{
