@@ -1068,16 +1068,7 @@ main(int argc, char **argv)
 
 	check_all_ports_link_status(l2fwd_enabled_port_mask);
 
-	/* initialize flow table 8< */
-	for(i = 0; i< FLOW_NUM; i++)
-	{
-		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
-		for(j = 0; j <= SLOTS; j++)
-		{
-			pkt_ctr[i].ctr[j] = 0;
-		}
-	}
-	/* >8 end of initialize flow table*/
+	initialize_flow_table();
 
 	ret = 0;
 	/* launch per-lcore init on every lcore */

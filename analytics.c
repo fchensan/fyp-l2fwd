@@ -3,6 +3,19 @@
 int hwts_dynfield_offset = -1;
 
 void
+initialize_flow_table()
+{
+	for(int i = 0; i< FLOW_NUM; i++)
+	{
+		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
+		for(int j = 0; j <= SLOTS; j++)
+		{
+			pkt_ctr[i].ctr[j] = 0;
+		}
+	}
+}
+
+void
 print_features_extracted()
 {
 	int i, bucket;
@@ -50,12 +63,16 @@ print_features_extracted()
 	printf("Total flows: %d\n", count);
 }
 
-uint32_t get_index(struct rte_mbuf *m) {
+uint32_t get_bucket(struct rte_mbuf *m) {
 	return m->hash.rss & 0xffff;
 }
 
 uint32_t get_tag(struct rte_mbuf *m) {
 	return (m->hash.rss & 0xffff0000)>>16;
+}
+
+bool check_slot_match(uint32_t bucket, uint32_t tag) {
+	return pkt_ctr[bucket].hi_f1 == tag;
 }
 
 void
@@ -144,7 +161,7 @@ perform_analytics(struct rte_mbuf *m)
 
 	uint32_t index_h, index_l;
 
-	index_l = get_index(m);
+	index_l = get_bucket(m);
 	index_h = get_tag(m);
 
 	if(pkt_ctr[index_l].hi_f1 == 0)
@@ -153,7 +170,7 @@ perform_analytics(struct rte_mbuf *m)
 	} 
 	else
 	{
-		if(pkt_ctr[index_l].hi_f1 == index_h)
+		if(check_slot_match(index_l, index_h))
 		{
 			pkt_ctr[index_l].ctr[0]++;
 
