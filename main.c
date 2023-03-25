@@ -1068,7 +1068,9 @@ main(int argc, char **argv)
 
 	check_all_ports_link_status(l2fwd_enabled_port_mask);
 
+	printf("Initializing flow table\n");
 	initialize_flow_table();
+	printf("Done initializing flow table\n");
 
 	ret = 0;
 	/* launch per-lcore init on every lcore */

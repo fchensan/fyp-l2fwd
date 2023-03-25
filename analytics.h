@@ -1,11 +1,14 @@
 #include <stdint.h>
 #include <rte_mbuf.h>
 #include <rte_ethdev.h>
+#include <rte_hash.h>
 
-#define DATA_STRUCTURE CUCKOO // Possible values: NAIVE, CUCKOO
+#define DATA_STRUCTURE_NAIVE // Possible values: NAIVE, CUCKOO
 #define BUCKET_FULL 255 // Change this to the max of uint8_t
 
 #define FLOW_NUM 65536
+#define NOT_FOUND FLOW_NUM-1
+#define INSERT_FAILED FLOW_NUM-1
 
 #define UDP 0
 #define TCP 1
@@ -62,16 +65,17 @@ struct pkt_count
 
 struct pkt_count pkt_ctr[FLOW_NUM] __rte_cache_aligned;
 
+#ifdef DATA_STRUCTURE_CUCKOO
+struct rte_hash *lookup_struct;
+#endif
+
 void initialize_flow_table();
 
 void print_features_extracted();
 
-uint32_t get_bucket(struct rte_mbuf *m);
-uint32_t get_tag(struct rte_mbuf *m);
-uint8_t get_available_slot(uint32_t index);
-bool check_slot_match(uint32_t bucket, uint32_t tag);
+uint32_t lookup_index(struct rte_mbuf *m);
+uint32_t insert_flow_table(struct rte_mbuf *m);
 
-void init_counters(uint16_t index_l, uint16_t index_h, 
-	uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr);
+void init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m);
 
 void perform_analytics(struct rte_mbuf *m);

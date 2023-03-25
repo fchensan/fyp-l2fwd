@@ -1,10 +1,92 @@
 #include "analytics.h"
 
+#include <rte_common.h>
+#include <rte_hash.h>
+#include <rte_vect.h>
+
+#define ALL_32_BITS 0xffffffff
+#define BIT_8_TO_15 0x0000ff00
+
+#ifdef EM_HASH_CRC
+#include <rte_hash_crc.h>
+#define DEFAULT_HASH_FUNC       rte_hash_crc
+#else
+#include <rte_jhash.h>
+#define DEFAULT_HASH_FUNC       rte_jhash
+#endif
+
+#if defined(__ARM_NEON)
+static inline xmm_t
+em_mask_key(void *key, xmm_t mask)
+{
+	int32x4_t data = vld1q_s32((int32_t *)key);
+
+	return vandq_s32(data, mask);
+}
+#else
+#error No vector engine (NEON) available, check your toolchain
+#endif
+
 int hwts_dynfield_offset = -1;
+
+union ipv4_5tuple_host {
+	struct {
+		uint8_t  pad0;
+		uint8_t  proto;
+		uint16_t pad1;
+		uint32_t ip_src;
+		uint32_t ip_dst;
+		uint16_t port_src;
+		uint16_t port_dst;
+	};
+	xmm_t xmm;
+};
+
+static rte_xmm_t mask0 = (rte_xmm_t){.u32 = {BIT_8_TO_15, ALL_32_BITS,
+				ALL_32_BITS, ALL_32_BITS} };
+
+static inline uint32_t
+ipv4_hash_crc(const void *data, __rte_unused uint32_t data_len,
+		uint32_t init_val)
+{
+	const union ipv4_5tuple_host *k;
+	uint32_t t;
+	const uint32_t *p;
+
+	k = data;
+	t = k->proto;
+	p = (const uint32_t *)&k->port_src;
+
+#ifdef EM_HASH_CRC
+	init_val = rte_hash_crc_4byte(t, init_val);
+	init_val = rte_hash_crc_4byte(k->ip_src, init_val);
+	init_val = rte_hash_crc_4byte(k->ip_dst, init_val);
+	init_val = rte_hash_crc_4byte(*p, init_val);
+#else
+	init_val = rte_jhash_1word(t, init_val);
+	init_val = rte_jhash_1word(k->ip_src, init_val);
+	init_val = rte_jhash_1word(k->ip_dst, init_val);
+	init_val = rte_jhash_1word(*p, init_val);
+#endif
+
+	return init_val;
+}
 
 void
 initialize_flow_table()
 {
+	#if defined(DATA_STRUCTURE_CUCKOO)
+	struct rte_hash_parameters hash_params = {
+		.name = "test",
+		.entries = FLOW_NUM,
+		.key_len = sizeof(union ipv4_5tuple_host),
+		.hash_func = ipv4_hash_crc,
+		.hash_func_init_val = 0,
+		.socket_id = rte_socket_id(),
+	};
+
+	lookup_struct = rte_hash_create(&hash_params);
+	#elif defined(DATA_STRUCTURE_NAIVE)
 	for(int i = 0; i< FLOW_NUM; i++)
 	{
 		pkt_ctr[i].hi_f1 = pkt_ctr[i].hi_f2 = 0;
@@ -13,6 +95,7 @@ initialize_flow_table()
 			pkt_ctr[i].ctr[j] = 0;
 		}
 	}
+	#endif
 }
 
 void
@@ -63,71 +146,80 @@ print_features_extracted()
 	printf("Total flows: %d\n", count);
 }
 
-uint32_t get_bucket(struct rte_mbuf *m) {
-	return m->hash.rss & 0xffff;
+#if defined(DATA_STRUCTURE_CUCKOO)
+static void get_key(union ipv4_5tuple_host *key, struct rte_mbuf *m) {
+	struct rte_ether_hdr *eth_hdr;
+	uint16_t ether_type;
+	void *l3;
+	int hdr_len;
+	void *ipv4_hdr;
+
+	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+	ether_type = eth_hdr->ether_type;
+	l3 = (uint8_t *)eth_hdr + sizeof(struct rte_ether_hdr);
+	if (ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		ipv4_hdr = (struct rte_ipv4_hdr *)l3;
+	}
+
+	ipv4_hdr = (uint8_t *)ipv4_hdr +
+		offsetof(struct rte_ipv4_hdr, time_to_live);
+
+	/*
+	 * Get 5 tuple: dst port, src port, dst IP address,
+	 * src IP address and protocol.
+	 */
+	key->xmm = em_mask_key(ipv4_hdr, mask0.x);
+}
+#endif
+
+uint32_t lookup_index(struct rte_mbuf *m) {
+	#if defined(DATA_STRUCTURE_NAIVE)
+	uint32_t bucket = m->hash.rss & 0xffff;
+	uint32_t tag = (m->hash.rss & 0xffff0000)>>16;
+	if (pkt_ctr[bucket].hi_f1 == tag)
+		return bucket;
+	else
+		return NOT_FOUND;
+	#elif defind(DATA_STRUCTURE_CUCKOO)
+	int ret = 3;
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+
+	// /* Find destination port */
+	ret = rte_hash_lookup(lookup_struct, (const void *)&key);
+
+	return (ret < 0) ? NOT_FOUND : ret;
+	#endif
 }
 
-uint32_t get_tag(struct rte_mbuf *m) {
-	return (m->hash.rss & 0xffff0000)>>16;
-}
+uint32_t insert_flow_table(struct rte_mbuf *m) {
+	#if defined(DATA_STRUCTURE_NAIVE)
+	uint32_t bucket = m->hash.rss & 0xffff;
 
-bool check_slot_match(uint32_t bucket, uint32_t tag) {
-	return pkt_ctr[bucket].hi_f1 == tag;
+	if (pkt_ctr[bucket].hi_f1 == 0)
+		return bucket;
+	else
+		return NOT_FOUND;
+	#elif defined(DATA_STRUCTURE_CUCKOO)
+	int ret;
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+
+	ret = rte_hash_add_key(lookup_struct, (void *) &key);
+	if (ret < 0) {
+		rte_exit(EXIT_FAILURE, "Unable to add entry");
+	} else {
+		return ret;
+	}
+	#endif
 }
 
 void
-init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m, uint64_t packet_len, struct rte_ipv4_hdr *ipv4_hdr) {
+init_counters(uint16_t index, uint16_t tag, uint16_t slot, struct rte_mbuf *m) {
 	struct rte_tcp_hdr *tcp_hdr;
 	struct rte_udp_hdr *udp_hdr;
-
-	pkt_ctr[index_l].hi_f1 = index_h;
-	pkt_ctr[index_l].ctr[bucket]++;
-
-	pkt_ctr[index_l].max_packet_len[bucket] = packet_len;
-	pkt_ctr[index_l].min_packet_len[bucket] = packet_len;
-
-	pkt_ctr[index_l].mean_packet_len[bucket] = packet_len;
-	pkt_ctr[index_l].variance_packet_len[bucket] = 0;
-
-	uint64_t now = *hwts_field(m);
-	pkt_ctr[index_l].first_seen[bucket] = now;
-	pkt_ctr[index_l].last_seen[bucket] = now;
-	pkt_ctr[index_l].max_interarrival_time[bucket] = 0;
-	pkt_ctr[index_l].min_interarrival_time[bucket] = 0xFFFFFFFF;
-
-	pkt_ctr[index_l].mean_interarrival_time[bucket] = 0;
-	pkt_ctr[index_l].variance_interarrival_time[bucket] = 0;
-
-	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr),
-		&(pkt_ctr[index_l].ip_src[bucket][0]),
-		&(pkt_ctr[index_l].ip_src[bucket][1]),
-		&(pkt_ctr[index_l].ip_src[bucket][2]),
-		&(pkt_ctr[index_l].ip_src[bucket][3]));
-
-		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr),
-		&(pkt_ctr[index_l].ip_dst[bucket][0]),
-		&(pkt_ctr[index_l].ip_dst[bucket][1]),
-		&(pkt_ctr[index_l].ip_dst[bucket][2]),
-		&(pkt_ctr[index_l].ip_dst[bucket][3]));
-
-		if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
-                        tcp_hdr = (struct rte_tcp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
-                        pkt_ctr[index_l].src_port[bucket] = rte_be_to_cpu_16(tcp_hdr->src_port);
-                        pkt_ctr[index_l].dst_port[bucket] = rte_be_to_cpu_16(tcp_hdr->dst_port);
-			pkt_ctr[index_l].protocol[bucket] = TCP;
-		} else {
-			udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
-                        pkt_ctr[index_l].src_port[bucket] = rte_be_to_cpu_16(udp_hdr->src_port);
-                        pkt_ctr[index_l].dst_port[bucket] = rte_be_to_cpu_16(udp_hdr->dst_port);
-			pkt_ctr[index_l].protocol[bucket] = UDP;
-		}
-	}
-}
-
-void
-perform_analytics(struct rte_mbuf *m)
-{
 
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
@@ -159,57 +251,102 @@ perform_analytics(struct rte_mbuf *m)
 		// packet_len = rte_pktmbuf_pkt_len(m);
 	}
 
-	uint32_t index_h, index_l;
+	pkt_ctr[index].hi_f1 = tag;
+	pkt_ctr[index].ctr[slot]++;
 
-	index_l = get_bucket(m);
-	index_h = get_tag(m);
+	pkt_ctr[index].max_packet_len[slot] = packet_len;
+	pkt_ctr[index].min_packet_len[slot] = packet_len;
 
-	if(pkt_ctr[index_l].hi_f1 == 0)
-	{
-		init_counters(index_l, index_h, 0, m, packet_len, ipv4_hdr);
-	} 
-	else
-	{
-		if(check_slot_match(index_l, index_h))
-		{
-			pkt_ctr[index_l].ctr[0]++;
+	pkt_ctr[index].mean_packet_len[slot] = packet_len;
+	pkt_ctr[index].variance_packet_len[slot] = 0;
 
-			if (pkt_ctr[index_l].max_packet_len[0] < packet_len)
-				pkt_ctr[index_l].max_packet_len[0] = packet_len;
+	uint64_t now = *hwts_field(m);
+	pkt_ctr[index].first_seen[slot] = now;
+	pkt_ctr[index].last_seen[slot] = now;
+	pkt_ctr[index].max_interarrival_time[slot] = 0;
+	pkt_ctr[index].min_interarrival_time[slot] = 0xFFFFFFFF;
 
-			if (pkt_ctr[index_l].min_packet_len[0] > packet_len)
-			 	pkt_ctr[index_l].min_packet_len[0] = packet_len;
+	pkt_ctr[index].mean_interarrival_time[slot] = 0;
+	pkt_ctr[index].variance_interarrival_time[slot] = 0;
 
-			double old_mean = pkt_ctr[index_l].mean_packet_len[0];
-			pkt_ctr[index_l].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index_l].ctr[0];
-			pkt_ctr[index_l].variance_packet_len[0] = (
-				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index_l].mean_packet_len[0])
-				) / pkt_ctr[index_l].ctr[0];
+	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->src_addr),
+		&(pkt_ctr[index].ip_src[slot][0]),
+		&(pkt_ctr[index].ip_src[slot][1]),
+		&(pkt_ctr[index].ip_src[slot][2]),
+		&(pkt_ctr[index].ip_src[slot][3]));
 
-			uint64_t now = *hwts_field(m);
+		uint32_t_to_char(rte_bswap32(ipv4_hdr->dst_addr),
+		&(pkt_ctr[index].ip_dst[slot][0]),
+		&(pkt_ctr[index].ip_dst[slot][1]),
+		&(pkt_ctr[index].ip_dst[slot][2]),
+		&(pkt_ctr[index].ip_dst[slot][3]));
 
-			uint64_t delta = now - pkt_ctr[index_l].last_seen[0];
-			pkt_ctr[index_l].last_seen[0] = now;
-
-			if (pkt_ctr[index_l].max_interarrival_time[0] < delta)
-			 	pkt_ctr[index_l].max_interarrival_time[0] = delta;
-
-			if (pkt_ctr[index_l].min_interarrival_time[0] > delta)
-			 	pkt_ctr[index_l].min_interarrival_time[0] = delta;
-
-			double old_variance_mean = pkt_ctr[index_l].mean_interarrival_time[0];
-
-			if (pkt_ctr[index_l].mean_interarrival_time[0] == 0)
-				pkt_ctr[index_l].mean_interarrival_time[0] = delta;
-			else
-				pkt_ctr[index_l].mean_interarrival_time[0] += (delta - old_variance_mean) / (pkt_ctr[index_l].ctr[0] - 1);
-
-			pkt_ctr[index_l].variance_interarrival_time[0] = (
-				(pkt_ctr[index_l].ctr[0] - 1) * pkt_ctr[index_l].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index_l].mean_interarrival_time[0])
-				) / pkt_ctr[index_l].ctr[0];
+		if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
+                        tcp_hdr = (struct rte_tcp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
+                        pkt_ctr[index].src_port[slot] = rte_be_to_cpu_16(tcp_hdr->src_port);
+                        pkt_ctr[index].dst_port[slot] = rte_be_to_cpu_16(tcp_hdr->dst_port);
+			pkt_ctr[index].protocol[slot] = TCP;
+		} else {
+			udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
+                        pkt_ctr[index].src_port[slot] = rte_be_to_cpu_16(udp_hdr->src_port);
+                        pkt_ctr[index].dst_port[slot] = rte_be_to_cpu_16(udp_hdr->dst_port);
+			pkt_ctr[index].protocol[slot] = UDP;
 		}
+	}
+}
+
+void
+perform_analytics(struct rte_mbuf *m)
+{
+	if (!RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+		return;
+	}
+
+	uint32_t index = lookup_index(m);
+
+	if (index == NOT_FOUND) {
+		index = insert_flow_table(m);
+		if (index != INSERT_FAILED)
+			init_counters(index, (m->hash.rss & 0xffff0000)>>16, 0, m);
+	} else {
+		uint64_t packet_len = rte_pktmbuf_pkt_len(m);
+
+		pkt_ctr[index].ctr[0]++;
+
+		if (pkt_ctr[index].max_packet_len[0] < packet_len)
+			pkt_ctr[index].max_packet_len[0] = packet_len;
+
+		if (pkt_ctr[index].min_packet_len[0] > packet_len)
+			pkt_ctr[index].min_packet_len[0] = packet_len;
+
+		double old_mean = pkt_ctr[index].mean_packet_len[0];
+		pkt_ctr[index].mean_packet_len[0] += (packet_len - old_mean) / pkt_ctr[index].ctr[0];
+		pkt_ctr[index].variance_packet_len[0] = (
+			(pkt_ctr[index].ctr[0] - 1) * pkt_ctr[index].variance_packet_len[0] + (packet_len - old_mean) * (packet_len - pkt_ctr[index].mean_packet_len[0])
+			) / pkt_ctr[index].ctr[0];
+
+		uint64_t now = *hwts_field(m);
+
+		uint64_t delta = now - pkt_ctr[index].last_seen[0];
+		pkt_ctr[index].last_seen[0] = now;
+
+		if (pkt_ctr[index].max_interarrival_time[0] < delta)
+			pkt_ctr[index].max_interarrival_time[0] = delta;
+
+		if (pkt_ctr[index].min_interarrival_time[0] > delta)
+			pkt_ctr[index].min_interarrival_time[0] = delta;
+
+		double old_variance_mean = pkt_ctr[index].mean_interarrival_time[0];
+
+		if (pkt_ctr[index].mean_interarrival_time[0] == 0)
+			pkt_ctr[index].mean_interarrival_time[0] = delta;
 		else
-			pkt_ctr[index_l].ctr[SLOTS+1]++;
+			pkt_ctr[index].mean_interarrival_time[0] += (delta - old_variance_mean) / (pkt_ctr[index].ctr[0] - 1);
+
+		pkt_ctr[index].variance_interarrival_time[0] = (
+			(pkt_ctr[index].ctr[0] - 1) * pkt_ctr[index].variance_interarrival_time[0] + (delta - old_variance_mean) * (delta - pkt_ctr[index].mean_interarrival_time[0])
+			) / pkt_ctr[index].ctr[0];
 	}
 }
 
