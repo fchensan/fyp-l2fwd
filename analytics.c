@@ -310,9 +310,13 @@ perform_analytics(struct rte_mbuf *m)
 		if (index != INSERT_FAILED)
 			init_counters(index, (m->hash.rss & 0xffff0000)>>16, 0, m);
 	} else {
-		uint64_t packet_len = rte_pktmbuf_pkt_len(m);
-
 		pkt_ctr[index].ctr[0]++;
+
+		#if defined(COUNT_ONLY)
+		return;
+		#endif
+
+		uint64_t packet_len = rte_pktmbuf_pkt_len(m);
 
 		if (pkt_ctr[index].max_packet_len[0] < packet_len)
 			pkt_ctr[index].max_packet_len[0] = packet_len;
