@@ -72,6 +72,7 @@ struct rte_hash *lookup_struct;
 void initialize_flow_table();
 
 void print_features_extracted();
+void print_flow_count();
 
 uint32_t lookup_index(struct rte_mbuf *m);
 uint32_t insert_flow_table(struct rte_mbuf *m);

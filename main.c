@@ -239,8 +239,8 @@ print_stats(void)
 		   total_packets_dropped);
 	printf("\n====================================================\n");
 
-	if (enable_analytics)
-		print_features_extracted();
+	// if (enable_analytics)
+	// 	print_features_extracted();
 	printf("Average packet latency (cycles): %ld", latest_latency);
 	fflush(stdout);
 }
@@ -752,6 +752,7 @@ print_welcome(void)
 static void
 signal_handler(int signum)
 {
+	print_flow_count();
 	print_welcome();
 	if (signum == SIGINT || signum == SIGTERM) {
 		printf("\n\nSignal %d received, preparing to exit...\n",

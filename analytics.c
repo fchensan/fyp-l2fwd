@@ -102,12 +102,10 @@ void
 print_features_extracted()
 {
 	int i, bucket;
-	int count = 0;
 	for(i=0; i< FLOW_NUM; i++)
 	{
 		for (bucket=0; bucket<SLOTS; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
-				count++;
 				// continue;
 				char *protocol_name;
 				switch (pkt_ctr[i].protocol[bucket]) {
@@ -140,6 +138,21 @@ print_features_extracted()
 				printf("mean interarrival time: %f, variance interarrival time: %f", pkt_ctr[i].mean_interarrival_time[bucket], pkt_ctr[i].variance_interarrival_time[bucket]);
 
 				printf("\n");
+			}
+		}
+	}
+}
+
+void
+print_flow_count()
+{
+	int i, bucket;
+	int count = 0;
+	for(i=0; i< FLOW_NUM; i++)
+	{
+		for (bucket=0; bucket<SLOTS; bucket++) {
+			if (pkt_ctr[i].ctr[bucket] > 0) {
+				count++;
 			}
 		}
 	}
@@ -180,7 +193,7 @@ uint32_t lookup_index(struct rte_mbuf *m) {
 		return bucket;
 	else
 		return NOT_FOUND;
-	#elif defind(DATA_STRUCTURE_CUCKOO)
+	#elif defined(DATA_STRUCTURE_CUCKOO)
 	int ret = 3;
 	union ipv4_5tuple_host key;
 
