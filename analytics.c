@@ -3,9 +3,27 @@
 #include <rte_common.h>
 #include <rte_hash.h>
 #include <rte_vect.h>
+uint32_t insert_count = 0;
+uint32_t lookup_count = 0;
+int init_count = 0;
+uint32_t manual_count[FLOW_NUM] = {0};
 
 #define ALL_32_BITS 0xffffffff
 #define BIT_8_TO_15 0x0000ff00
+
+#if defined(MEASURE_LOOKUP_TIME)
+static uint64_t total_lookup_ticks = 0;
+static uint64_t prev_lookup_ticks = 0;
+#endif
+
+#if defined(MEASURE_INSERT_TIME)
+static uint64_t total_insert_ticks = 0;
+static uint64_t prev_insert_ticks = 0;
+#endif
+
+#if defined(RTE_ARCH_X86) || defined(__ARM_FEATURE_CRC32)
+#define EM_HASH_CRC 1
+#endif
 
 #ifdef EM_HASH_CRC
 #include <rte_hash_crc.h>
@@ -15,7 +33,15 @@
 #define DEFAULT_HASH_FUNC       rte_jhash
 #endif
 
-#if defined(__ARM_NEON)
+#if defined(__SSE2__)
+static inline xmm_t
+em_mask_key(void *key, xmm_t mask)
+{
+	__m128i data = _mm_loadu_si128((__m128i *)(key));
+
+	return _mm_and_si128(data, mask);
+}
+#elif defined(__ARM_NEON)
 static inline xmm_t
 em_mask_key(void *key, xmm_t mask)
 {
@@ -86,6 +112,14 @@ initialize_flow_table()
 	};
 
 	lookup_struct = rte_hash_create(&hash_params);
+
+	for(int i = 0; i< FLOW_NUM; i++)
+	{
+		for(int j = 0; j <= SLOTS; j++)
+		{
+			pkt_ctr[i].ctr[j] = 0;
+		}
+	}
 	#elif defined(DATA_STRUCTURE_NAIVE)
 	for(int i = 0; i< FLOW_NUM; i++)
 	{
@@ -148,18 +182,42 @@ print_flow_count()
 {
 	int i, bucket;
 	int count = 0;
+	int count_more_than_one = 0;
 	for(i=0; i< FLOW_NUM; i++)
 	{
 		for (bucket=0; bucket<SLOTS; bucket++) {
 			if (pkt_ctr[i].ctr[bucket] > 0) {
 				count++;
 			}
+			if (pkt_ctr[i].ctr[bucket] > 1) {
+				count_more_than_one++;
+			}
 		}
 	}
-	printf("Total flows: %d\n", count);
+	printf("Total flows, based on packet count: %d\n", count);
+	// printf("Total flows, based on key count: %d\n", rte_hash_count(lookup_struct));
+	printf("Total flows with more than one packet: %d\n", count_more_than_one);
 }
 
-#if defined(DATA_STRUCTURE_CUCKOO)
+void print_timing_stats()
+{
+	#if defined(MEASURE_LOOKUP_TIME)
+	printf("Lookup total ticks: %ld\n", total_lookup_ticks);
+	#endif
+	printf("Lookup count: %d \n", lookup_count);
+	#if defined(MEASURE_INSERT_TIME)
+	printf("Insert total ticks: %ld\n", total_insert_ticks);
+	#endif
+	printf("Insert count: %d \n", insert_count);
+	printf("Init count: %d \n", init_count);
+	printf("Flow num: %d \n", FLOW_NUM);
+	int total = 0;
+	for (int i = 0; i < FLOW_NUM; i++)
+		if (manual_count[i] == 1)
+			total++;		
+	printf("%d\n", total);
+}
+
 static void get_key(union ipv4_5tuple_host *key, struct rte_mbuf *m) {
 	struct rte_ether_hdr *eth_hdr;
 	uint16_t ether_type;
@@ -183,37 +241,70 @@ static void get_key(union ipv4_5tuple_host *key, struct rte_mbuf *m) {
 	 */
 	key->xmm = em_mask_key(ipv4_hdr, mask0.x);
 }
-#endif
+
+static inline uint32_t
+get_crc_hash(struct rte_mbuf *m) {
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+
+	return ipv4_hash_crc(&key, 0, 0);
+}
 
 uint32_t lookup_index(struct rte_mbuf *m) {
+	lookup_count++;
 	#if defined(DATA_STRUCTURE_NAIVE)
-	uint32_t bucket = m->hash.rss & 0xffff;
-	uint32_t tag = (m->hash.rss & 0xffff0000)>>16;
+	#if defined(HASH_RSS)
+	uint32_t bucket = m->hash.rss & 0xfffff;
+	uint32_t tag = (m->hash.rss & 0xfff00000)>>20;
+
+	#elif defined(HASH_CRC)
+
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+	uint32_t hash = ipv4_hash_crc(&key, 0, 0);
+	uint32_t bucket = m->hash.rss & 0xfffff;
+	uint32_t tag = (m->hash.rss & 0xfff00000)>>20;
+
+	#endif
+
 	if (pkt_ctr[bucket].hi_f1 == tag)
 		return bucket;
 	else
 		return NOT_FOUND;
+
 	#elif defined(DATA_STRUCTURE_CUCKOO)
-	int ret = 3;
+	int ret;
 	union ipv4_5tuple_host key;
 
 	get_key(&key, m);
 
 	// /* Find destination port */
 	ret = rte_hash_lookup(lookup_struct, (const void *)&key);
-
+	
 	return (ret < 0) ? NOT_FOUND : ret;
 	#endif
 }
 
 uint32_t insert_flow_table(struct rte_mbuf *m) {
+	insert_count++;
 	#if defined(DATA_STRUCTURE_NAIVE)
-	uint32_t bucket = m->hash.rss & 0xffff;
+
+	#if defined(HASH_RSS)
+	uint32_t bucket = m->hash.rss & 0xfffff;
+	#elif defined(HASH_CRC)
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+	uint32_t bucket = ipv4_hash_crc(&key, 0, 0) & 0xfffff;
+	#endif
 
 	if (pkt_ctr[bucket].hi_f1 == 0)
 		return bucket;
 	else
-		return NOT_FOUND;
+		return INSERT_FAILED;
+
 	#elif defined(DATA_STRUCTURE_CUCKOO)
 	int ret;
 	union ipv4_5tuple_host key;
@@ -221,6 +312,7 @@ uint32_t insert_flow_table(struct rte_mbuf *m) {
 	get_key(&key, m);
 
 	ret = rte_hash_add_key(lookup_struct, (void *) &key);
+	
 	if (ret < 0) {
 		rte_exit(EXIT_FAILURE, "Unable to add entry");
 	} else {
@@ -230,7 +322,8 @@ uint32_t insert_flow_table(struct rte_mbuf *m) {
 }
 
 void
-init_counters(uint16_t index, uint16_t tag, uint16_t slot, struct rte_mbuf *m) {
+init_counters(uint32_t index, uint16_t tag, uint16_t slot, struct rte_mbuf *m) {
+	init_count++;
 	struct rte_tcp_hdr *tcp_hdr;
 	struct rte_udp_hdr *udp_hdr;
 
@@ -316,12 +409,25 @@ perform_analytics(struct rte_mbuf *m)
 		return;
 	}
 
+	#if defined(MEASURE_LOOKUP_TIME)
+	prev_lookup_ticks = rte_rdtsc();
+	#endif
 	uint32_t index = lookup_index(m);
+	#if defined(MEASURE_LOOKUP_TIME)
+	total_lookup_ticks += rte_rdtsc() - prev_lookup_ticks;
+	#endif
 
 	if (index == NOT_FOUND) {
+		#if defined(MEASURE_INSERT_TIME)
+		prev_insert_ticks = rte_rdtsc();
+		#endif
 		index = insert_flow_table(m);
+		#if defined(MEASURE_INSERT_TIME)
+		total_insert_ticks += rte_rdtsc() - prev_insert_ticks;
+		#endif
+
 		if (index != INSERT_FAILED)
-			init_counters(index, (m->hash.rss & 0xffff0000)>>16, 0, m);
+			init_counters(index, (m->hash.rss & 0xfff0000) >> 20, 0, m);
 	} else {
 		pkt_ctr[index].ctr[0]++;
 

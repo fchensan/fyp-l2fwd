@@ -6,7 +6,12 @@
 #define DATA_STRUCTURE_NAIVE // Possible values: NAIVE, CUCKOO
 #define BUCKET_FULL 255 // Change this to the max of uint8_t
 
-#define FLOW_NUM 65536
+#define HASH_CRC 1 // Possible values HASH_CRC, HASH_RSS
+
+#define MEASURE_LOOKUP_TIME 1
+#define MEASURE_INSERT_TIME 1
+
+#define FLOW_NUM 1048576
 #define NOT_FOUND FLOW_NUM-1
 #define INSERT_FAILED FLOW_NUM-1
 
@@ -73,10 +78,6 @@ void initialize_flow_table();
 
 void print_features_extracted();
 void print_flow_count();
-
-uint32_t lookup_index(struct rte_mbuf *m);
-uint32_t insert_flow_table(struct rte_mbuf *m);
-
-void init_counters(uint16_t index_l, uint16_t index_h, uint16_t bucket, struct rte_mbuf *m);
+void print_timing_stats();
 
 void perform_analytics(struct rte_mbuf *m);

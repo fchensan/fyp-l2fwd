@@ -49,7 +49,7 @@ static int mac_updating = 1;
 
 /* Run analytics (disabled by default for debugging and benchmarking) */
 static int enable_analytics = 0;
-#define OVERRIDE_DST_MAC 0x4c8aa4a1420c;
+#define OVERRIDE_DST_MAC 0xa8a6e2a1420c;
 
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
@@ -239,8 +239,10 @@ print_stats(void)
 		   total_packets_dropped);
 	printf("\n====================================================\n");
 
-	// if (enable_analytics)
-	// 	print_features_extracted();
+	if (enable_analytics) {
+		print_flow_count();
+		print_timing_stats();
+	}
 	printf("Average packet latency (cycles): %ld", latest_latency);
 	fflush(stdout);
 }
@@ -796,6 +798,7 @@ main(int argc, char **argv)
 
 	/* convert to number of cycles */
 	timer_period *= rte_get_timer_hz();
+	printf("hz: %ld\n", rte_get_timer_hz());
 
 	nb_ports = rte_eth_dev_count_avail();
 	if (nb_ports == 0)
