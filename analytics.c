@@ -264,8 +264,8 @@ uint32_t lookup_index(struct rte_mbuf *m) {
 
 	get_key(&key, m);
 	uint32_t hash = ipv4_hash_crc(&key, 0, 0);
-	uint32_t bucket = m->hash.rss & 0xfffff;
-	uint32_t tag = (m->hash.rss & 0xfff00000)>>20;
+	uint32_t bucket = hash & 0xfffff;
+	uint32_t tag = (hash & 0xfff00000)>>20;
 
 	#endif
 
