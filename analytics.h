@@ -2,11 +2,12 @@
 #include <rte_mbuf.h>
 #include <rte_ethdev.h>
 #include <rte_hash.h>
+#include <rte_vect.h>
 
 #define DATA_STRUCTURE_NAIVE // Possible values: NAIVE, CUCKOO
 #define BUCKET_FULL 255 // Change this to the max of uint8_t
 
-#define HASH_CRC 1 // Possible values HASH_CRC, HASH_RSS
+#define HASH_RSS 1 // Possible values HASH_CRC, HASH_RSS
 
 #define MEASURE_LOOKUP_TIME 1
 #define MEASURE_INSERT_TIME 1
@@ -36,10 +37,28 @@ hwts_field(struct rte_mbuf *mbuf)
 			hwts_dynfield_offset, rte_mbuf_timestamp_t *);
 }
 
+union ipv4_5tuple_host {
+	struct {
+		uint8_t  pad0;
+		uint8_t  proto;
+		uint16_t pad1;
+		uint32_t ip_src;
+		uint32_t ip_dst;
+		uint16_t port_src;
+		uint16_t port_dst;
+	};
+	xmm_t xmm;
+};
+
 struct pkt_count
 {
 	uint16_t hi_f1;
 	uint16_t hi_f2;
+
+	#if defined(DATA_STRUCTURE_NAIVE)
+	union ipv4_5tuple_host key;
+	#endif
+
 	uint32_t ctr[SLOTS+1];
 
 	uint64_t max_packet_len[SLOTS];

@@ -55,19 +55,6 @@ em_mask_key(void *key, xmm_t mask)
 
 int hwts_dynfield_offset = -1;
 
-union ipv4_5tuple_host {
-	struct {
-		uint8_t  pad0;
-		uint8_t  proto;
-		uint16_t pad1;
-		uint32_t ip_src;
-		uint32_t ip_dst;
-		uint16_t port_src;
-		uint16_t port_dst;
-	};
-	xmm_t xmm;
-};
-
 static rte_xmm_t mask0 = (rte_xmm_t){.u32 = {BIT_8_TO_15, ALL_32_BITS,
 				ALL_32_BITS, ALL_32_BITS} };
 
@@ -218,6 +205,12 @@ void print_timing_stats()
 	printf("%d\n", total);
 }
 
+static bool match_key(union ipv4_5tuple_host key_1, union ipv4_5tuple_host key_2) {
+	return (key_1.proto == key_2.proto) && (key_1.ip_src == key_2.ip_src)
+		&& (key_1.ip_dst == key_2.ip_dst) && (key_1.port_src == key_2.port_src)
+		&& (key_1.port_dst == key_2.port_dst);
+}
+
 static void get_key(union ipv4_5tuple_host *key, struct rte_mbuf *m) {
 	struct rte_ether_hdr *eth_hdr;
 	uint16_t ether_type;
@@ -253,6 +246,11 @@ get_crc_hash(struct rte_mbuf *m) {
 
 uint32_t lookup_index(struct rte_mbuf *m) {
 	lookup_count++;
+
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+
 	#if defined(DATA_STRUCTURE_NAIVE)
 	#if defined(HASH_RSS)
 	uint32_t bucket = m->hash.rss & 0xfffff;
@@ -260,25 +258,19 @@ uint32_t lookup_index(struct rte_mbuf *m) {
 
 	#elif defined(HASH_CRC)
 
-	union ipv4_5tuple_host key;
-
-	get_key(&key, m);
 	uint32_t hash = ipv4_hash_crc(&key, 0, 0);
 	uint32_t bucket = hash & 0xfffff;
 	uint32_t tag = (hash & 0xfff00000)>>20;
 
 	#endif
 
-	if (pkt_ctr[bucket].hi_f1 == tag)
+	if (match_key(pkt_ctr[bucket].key, key))
 		return bucket;
 	else
 		return NOT_FOUND;
 
 	#elif defined(DATA_STRUCTURE_CUCKOO)
 	int ret;
-	union ipv4_5tuple_host key;
-
-	get_key(&key, m);
 
 	// /* Find destination port */
 	ret = rte_hash_lookup(lookup_struct, (const void *)&key);
@@ -289,27 +281,30 @@ uint32_t lookup_index(struct rte_mbuf *m) {
 
 uint32_t insert_flow_table(struct rte_mbuf *m) {
 	insert_count++;
+
+	union ipv4_5tuple_host key;
+
+	get_key(&key, m);
+
 	#if defined(DATA_STRUCTURE_NAIVE)
 
 	#if defined(HASH_RSS)
 	uint32_t bucket = m->hash.rss & 0xfffff;
 	#elif defined(HASH_CRC)
-	union ipv4_5tuple_host key;
-
-	get_key(&key, m);
+	
 	uint32_t bucket = ipv4_hash_crc(&key, 0, 0) & 0xfffff;
 	#endif
 
-	if (pkt_ctr[bucket].hi_f1 == 0)
+	if (pkt_ctr[bucket].ctr[0] == 0)
 		return bucket;
 	else
 		return INSERT_FAILED;
 
 	#elif defined(DATA_STRUCTURE_CUCKOO)
 	int ret;
-	union ipv4_5tuple_host key;
+	// union ipv4_5tuple_host key;
 
-	get_key(&key, m);
+	// get_key(&key, m);
 
 	ret = rte_hash_add_key(lookup_struct, (void *) &key);
 	
@@ -359,6 +354,10 @@ init_counters(uint32_t index, uint16_t tag, uint16_t slot, struct rte_mbuf *m) {
 
 	pkt_ctr[index].hi_f1 = tag;
 	pkt_ctr[index].ctr[slot]++;
+
+	#if defined(DATA_STRUCTURE_NAIVE)
+	get_key(&(pkt_ctr[index].key), m);
+	#endif
 
 	pkt_ctr[index].max_packet_len[slot] = packet_len;
 	pkt_ctr[index].min_packet_len[slot] = packet_len;
