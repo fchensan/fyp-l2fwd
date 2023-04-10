@@ -324,33 +324,21 @@ init_counters(uint32_t index, uint16_t tag, uint16_t slot, struct rte_mbuf *m) {
 
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
-	// struct rte_ipv6_hdr *ipv6_hdr;
-	// struct rte_tcp_hdr *tcp_hdr;
-	// struct rte_udp_hdr *udp_hdr;
+
 	uint64_t l2_len;
 	uint64_t l3_len;
-	// uint64_t l4_len;
 	uint64_t packet_len = 0;
-	// uint64_t content_len;
-	// uint8_t *content;
-	uint16_t src_port;
-	uint16_t dst_port;
-	// uint32_t seq;
-	// uint32_t ack;
-	// char str[64] = {};
-	// char hash_value[64] = {};
-	// int diff = 0;
-	// bool recalc_checksum = false;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
 	l2_len = sizeof(struct rte_ether_hdr);
 
+	// Choose between extracting length from header, or from mbuf
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
 		ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
 		l3_len = sizeof(struct rte_ipv4_hdr);
 		packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
-		// packet_len = rte_pktmbuf_pkt_len(m);
 	}
+	// packet_len = rte_pktmbuf_pkt_len(m);
 
 	pkt_ctr[index].hi_f1 = tag;
 	pkt_ctr[index].ctr[slot]++;

@@ -49,7 +49,7 @@ static int mac_updating = 1;
 
 /* Run analytics (disabled by default for debugging and benchmarking) */
 static int enable_analytics = 0;
-#define OVERRIDE_DST_MAC 0xa8a6e2a1420c;
+#define OVERRIDE_DST_MAC 0x048aa4a1420c;
 
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
@@ -376,10 +376,8 @@ l2fwd_main_loop(void)
 			nb_rx = rte_eth_rx_burst(portid, 0,
 						 pkts_burst, MAX_PKT_BURST);
 
-			/* TODO: clarify the deletion
 			if (unlikely(nb_rx == 0))
 				continue;
-			*/
 
 			port_statistics[portid].rx += nb_rx;
 
@@ -894,7 +892,7 @@ main(int argc, char **argv)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 	/* >8 End of create the mbuf pool. */
 
-	/* TODO: what is this for? 8< */
+	/* Register mbuf field for timestamp 8< */
 	static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
 		.name = "example_bbdev_dynfield_tsc",
 		.size = sizeof(tsc_t),
@@ -905,7 +903,7 @@ main(int argc, char **argv)
 		rte_mbuf_dynfield_register(&tsc_dynfield_desc);
 	if (tsc_dynfield_offset < 0)
 		rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
-	/* >8 end TODO */
+	/* >8 end of register mbuf field for timestamp */
 
 	/* Initialise each port */
 	RTE_ETH_FOREACH_DEV(portid) {
@@ -1098,10 +1096,8 @@ main(int argc, char **argv)
 		printf(" Done\n");
 	}
 
-	/* TODO: clarify the deletion
 	// clean up the EAL
 	rte_eal_cleanup();
-	*/
 	printf("Bye...\n");
 
 	return ret;
