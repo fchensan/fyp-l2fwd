@@ -51,6 +51,8 @@ static int mac_updating = 1;
 static int enable_analytics = 0;
 #define OVERRIDE_DST_MAC 0x048aa4a1420c;
 
+#define MEASURE_PACKET_LATENCY 1;
+
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
 #define MAX_PKT_BURST 32
@@ -243,7 +245,11 @@ print_stats(void)
 		print_flow_count();
 		print_timing_stats();
 	}
+
+	#if defined(MEASURE_PACKET_LATENCY)
 	printf("Average packet latency (cycles): %ld", latest_latency);
+	#endif
+
 	fflush(stdout);
 }
 
@@ -1055,9 +1061,11 @@ main(int argc, char **argv)
 				l2fwd_ports_eth_addr[portid].addr_bytes[4],
 				l2fwd_ports_eth_addr[portid].addr_bytes[5]);
 
+		#if defined(MEASURE_PACKET_LATENCY)
 		/* Add callbacks for software timestamping for performance analysis. */
 		rte_eth_add_rx_callback(portid, 0, add_timestamps, NULL);
 		rte_eth_add_tx_callback(portid, 0, calc_latency, NULL);
+		#endif
 
 		/* initialize port stats */
 		memset(&port_statistics, 0, sizeof(port_statistics));
