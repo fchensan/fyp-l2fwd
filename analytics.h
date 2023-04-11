@@ -4,8 +4,10 @@
 #include <rte_hash.h>
 #include <rte_vect.h>
 
-#define DATA_STRUCTURE_CUCKOO // Possible values: NAIVE, CUCKOO
+#define DATA_STRUCTURE_NAIVE // Possible values: NAIVE, CUCKOO
 #define BUCKET_FULL 255 // Change this to the max of uint8_t
+
+#define NAIVE_MATCH_TAG 1
 
 #define HASH_RSS 1 // Possible values HASH_CRC, HASH_RSS
 

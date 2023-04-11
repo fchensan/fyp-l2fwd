@@ -5,6 +5,7 @@
 #include <rte_vect.h>
 uint32_t insert_count = 0;
 uint32_t lookup_count = 0;
+uint32_t test_count = 0;
 int init_count = 0;
 uint32_t manual_count[FLOW_NUM] = {0};
 
@@ -198,11 +199,12 @@ void print_timing_stats()
 	printf("Insert count: %d \n", insert_count);
 	printf("Init count: %d \n", init_count);
 	printf("Flow num: %d \n", FLOW_NUM);
-	int total = 0;
-	for (int i = 0; i < FLOW_NUM; i++)
-		if (manual_count[i] == 1)
-			total++;		
-	printf("%d\n", total);
+	printf("test num: %d \n", test_count);
+	// int total = 0;
+	// for (int i = 0; i < FLOW_NUM; i++)
+	// 	if (manual_count[i] == 1)
+	// 		total++;		
+	// printf("%d\n", total);
 }
 
 static bool match_key(union ipv4_5tuple_host key_1, union ipv4_5tuple_host key_2) {
@@ -254,20 +256,27 @@ uint32_t lookup_index(struct rte_mbuf *m) {
 	#if defined(DATA_STRUCTURE_NAIVE)
 	#if defined(HASH_RSS)
 	uint32_t bucket = m->hash.rss & 0x1ffff;
-	uint32_t tag = (m->hash.rss & 0xfff00000)>>20;
+	uint32_t tag = (m->hash.rss & 0xffff0000)>>16;
 
 	#elif defined(HASH_CRC)
 
 	uint32_t hash = ipv4_hash_crc(&key, 0, 0);
 	uint32_t bucket = hash & 0x1ffff;
-	uint32_t tag = (hash & 0xfff00000)>>20;
+	uint32_t tag = (hash & 0xffff0000)>>16;
 
 	#endif
 
+	#if defined(NAIVE_MATCH_TAG)
+	if (pkt_ctr[bucket].hi_f1 == tag)
+		return bucket;
+	else
+		return NOT_FOUND;
+	#else
 	if (match_key(pkt_ctr[bucket].key, key))
 		return bucket;
 	else
 		return NOT_FOUND;
+	#endif
 
 	#elif defined(DATA_STRUCTURE_CUCKOO)
 	int ret;
@@ -290,15 +299,25 @@ uint32_t insert_flow_table(struct rte_mbuf *m) {
 
 	#if defined(HASH_RSS)
 	uint32_t bucket = m->hash.rss & 0x1ffff;
+	uint32_t tag = (m->hash.rss & 0xffff0000)>>16;
 	#elif defined(HASH_CRC)
 	
-	uint32_t bucket = ipv4_hash_crc(&key, 0, 0) & 0x1ffff;
+	uint32_t hash = ipv4_hash_crc(&key, 0, 0);
+	uint32_t bucket = hash & 0x1ffff;
+	uint32_t tag = (hash & 0xffff0000)>>16;
 	#endif
 
+	#if defined(NAIVE_MATCH_TAG)
+	if (pkt_ctr[bucket].hi_f1 == 0)
+		return bucket;
+	else
+		return INSERT_FAILED;
+	#else
 	if (pkt_ctr[bucket].ctr[0] == 0)
 		return bucket;
 	else
 		return INSERT_FAILED;
+	#endif
 
 	#elif defined(DATA_STRUCTURE_CUCKOO)
 	int ret;
@@ -414,7 +433,7 @@ perform_analytics(struct rte_mbuf *m)
 		#endif
 
 		if (index != INSERT_FAILED)
-			init_counters(index, (m->hash.rss & 0xfff0000) >> 20, 0, m);
+			init_counters(index, (m->hash.rss & 0xffff0000) >> 16, 0, m);
 	} else {
 		pkt_ctr[index].ctr[0]++;
 
