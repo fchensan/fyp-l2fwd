@@ -4,7 +4,7 @@
 #include <rte_hash.h>
 #include <rte_vect.h>
 
-#define DATA_STRUCTURE_NAIVE // Possible values: NAIVE, CUCKOO
+#define DATA_STRUCTURE_CUCKOO // Possible values: NAIVE, CUCKOO
 #define BUCKET_FULL 255 // Change this to the max of uint8_t
 
 #define HASH_RSS 1 // Possible values HASH_CRC, HASH_RSS
@@ -12,7 +12,7 @@
 #define MEASURE_LOOKUP_TIME 1
 #define MEASURE_INSERT_TIME 1
 
-#define FLOW_NUM 1048576
+#define FLOW_NUM 131072
 #define NOT_FOUND FLOW_NUM-1
 #define INSERT_FAILED FLOW_NUM-1
 

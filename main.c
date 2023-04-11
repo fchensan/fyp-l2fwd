@@ -51,7 +51,7 @@ static int mac_updating = 1;
 static int enable_analytics = 0;
 #define OVERRIDE_DST_MAC 0x048aa4a1420c;
 
-#define MEASURE_PACKET_LATENCY 1;
+// #define MEASURE_PACKET_LATENCY 1;
 
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 

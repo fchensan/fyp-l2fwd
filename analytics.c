@@ -253,13 +253,13 @@ uint32_t lookup_index(struct rte_mbuf *m) {
 
 	#if defined(DATA_STRUCTURE_NAIVE)
 	#if defined(HASH_RSS)
-	uint32_t bucket = m->hash.rss & 0xfffff;
+	uint32_t bucket = m->hash.rss & 0x1ffff;
 	uint32_t tag = (m->hash.rss & 0xfff00000)>>20;
 
 	#elif defined(HASH_CRC)
 
 	uint32_t hash = ipv4_hash_crc(&key, 0, 0);
-	uint32_t bucket = hash & 0xfffff;
+	uint32_t bucket = hash & 0x1ffff;
 	uint32_t tag = (hash & 0xfff00000)>>20;
 
 	#endif
@@ -289,10 +289,10 @@ uint32_t insert_flow_table(struct rte_mbuf *m) {
 	#if defined(DATA_STRUCTURE_NAIVE)
 
 	#if defined(HASH_RSS)
-	uint32_t bucket = m->hash.rss & 0xfffff;
+	uint32_t bucket = m->hash.rss & 0x1ffff;
 	#elif defined(HASH_CRC)
 	
-	uint32_t bucket = ipv4_hash_crc(&key, 0, 0) & 0xfffff;
+	uint32_t bucket = ipv4_hash_crc(&key, 0, 0) & 0x1ffff;
 	#endif
 
 	if (pkt_ctr[bucket].ctr[0] == 0)
@@ -422,7 +422,21 @@ perform_analytics(struct rte_mbuf *m)
 		return;
 		#endif
 
-		uint64_t packet_len = rte_pktmbuf_pkt_len(m);
+		uint64_t packet_len = 0;
+
+		// struct rte_ether_hdr *eth_hdr;
+		// struct rte_ipv4_hdr *ipv4_hdr;
+		// uint64_t l2_len;
+
+		// eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+		// l2_len = sizeof(struct rte_ether_hdr);
+
+		// if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+		// 	ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+		// 	packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
+		// }
+
+		packet_len = rte_pktmbuf_pkt_len(m);
 
 		if (pkt_ctr[index].max_packet_len[0] < packet_len)
 			pkt_ctr[index].max_packet_len[0] = packet_len;
