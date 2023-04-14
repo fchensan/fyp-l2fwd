@@ -9,7 +9,9 @@
 
 #define NAIVE_MATCH_TAG 1
 
-#define HASH_RSS 1 // Possible values HASH_CRC, HASH_RSS
+// #define TCP_FLAGS 1
+
+#define HASH_CRC 1 // Possible values HASH_CRC, HASH_RSS
 
 #define MEASURE_LOOKUP_TIME 1
 #define MEASURE_INSERT_TIME 1
@@ -84,6 +86,10 @@ struct pkt_count
 	uint16_t dst_port[SLOTS];
 
 	unsigned char protocol[SLOTS];
+
+	#if defined(TCP_FLAGS)
+	uint32_t tcp_flags[SLOTS][8];
+	#endif
 
 	// bool expired[SLOTS];
 

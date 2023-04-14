@@ -157,7 +157,16 @@ print_features_extracted()
 
 				printf("mean packet len: %f, variance packet len: %f", pkt_ctr[i].mean_packet_len[bucket], pkt_ctr[i].variance_packet_len[bucket]);
 
-				printf("mean interarrival time: %f, variance interarrival time: %f", pkt_ctr[i].mean_interarrival_time[bucket], pkt_ctr[i].variance_interarrival_time[bucket]);
+				printf("mean interarrival time: %f, variance interarrival time: %f ", pkt_ctr[i].mean_interarrival_time[bucket], pkt_ctr[i].variance_interarrival_time[bucket]);
+
+				#if defined(TCP_FLAGS)
+				printf("tcp flags counts: %d %d %d %d %d %d %d %d", 
+					pkt_ctr[i].tcp_flags[bucket][0], pkt_ctr[i].tcp_flags[bucket][1],
+					pkt_ctr[i].tcp_flags[bucket][2], pkt_ctr[i].tcp_flags[bucket][3],
+					pkt_ctr[i].tcp_flags[bucket][4], pkt_ctr[i].tcp_flags[bucket][5],
+					pkt_ctr[i].tcp_flags[bucket][6], pkt_ctr[i].tcp_flags[bucket][7]
+					);
+				#endif
 
 				printf("\n");
 			}
@@ -399,6 +408,17 @@ init_counters(uint32_t index, uint16_t tag, uint16_t slot, struct rte_mbuf *m) {
                         pkt_ctr[index].src_port[slot] = rte_be_to_cpu_16(tcp_hdr->src_port);
                         pkt_ctr[index].dst_port[slot] = rte_be_to_cpu_16(tcp_hdr->dst_port);
 			pkt_ctr[index].protocol[slot] = TCP;
+
+			#if defined(TCP_FLAGS)
+			pkt_ctr[index].tcp_flags[slot][0] += (tcp_hdr->tcp_flags) & 0b00000001;
+			pkt_ctr[index].tcp_flags[slot][1] += (tcp_hdr->tcp_flags) & 0b00000010;
+			pkt_ctr[index].tcp_flags[slot][2] += (tcp_hdr->tcp_flags) & 0b00000100;
+			pkt_ctr[index].tcp_flags[slot][3] += (tcp_hdr->tcp_flags) & 0b00001000;
+			pkt_ctr[index].tcp_flags[slot][4] += (tcp_hdr->tcp_flags) & 0b00010000;
+			pkt_ctr[index].tcp_flags[slot][5] += (tcp_hdr->tcp_flags) & 0b00100000;
+			pkt_ctr[index].tcp_flags[slot][6] += (tcp_hdr->tcp_flags) & 0b01000000;
+			pkt_ctr[index].tcp_flags[slot][7] += (tcp_hdr->tcp_flags) & 0b10000000;
+			#endif
 		} else {
 			udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
                         pkt_ctr[index].src_port[slot] = rte_be_to_cpu_16(udp_hdr->src_port);
@@ -443,17 +463,31 @@ perform_analytics(struct rte_mbuf *m)
 
 		uint64_t packet_len = 0;
 
-		// struct rte_ether_hdr *eth_hdr;
-		// struct rte_ipv4_hdr *ipv4_hdr;
+		#if defined(TCP_FLAGS)
+		struct rte_ether_hdr *eth_hdr;
+		struct rte_ipv4_hdr *ipv4_hdr;
 		// uint64_t l2_len;
 
-		// eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+		eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
 		// l2_len = sizeof(struct rte_ether_hdr);
 
-		// if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
-		// 	ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-		// 	packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
-		// }
+		if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) { // IPv4
+			ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+			// packet_len = rte_be_to_cpu_16(ipv4_hdr->total_length) + l2_len + 4;
+			if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
+				struct rte_tcp_hdr *tcp_hdr = (struct rte_tcp_hdr *)((unsigned char *)ipv4_hdr + sizeof(struct rte_ipv4_hdr));
+				
+				pkt_ctr[index].tcp_flags[0][0] += (tcp_hdr->tcp_flags) & 0b00000001;
+				pkt_ctr[index].tcp_flags[0][1] += (tcp_hdr->tcp_flags) & 0b00000010;
+				pkt_ctr[index].tcp_flags[0][2] += (tcp_hdr->tcp_flags) & 0b00000100;
+				pkt_ctr[index].tcp_flags[0][3] += (tcp_hdr->tcp_flags) & 0b00001000;
+				pkt_ctr[index].tcp_flags[0][4] += (tcp_hdr->tcp_flags) & 0b00010000;
+				pkt_ctr[index].tcp_flags[0][5] += (tcp_hdr->tcp_flags) & 0b00100000;
+				pkt_ctr[index].tcp_flags[0][6] += (tcp_hdr->tcp_flags) & 0b01000000;
+				pkt_ctr[index].tcp_flags[0][7] += (tcp_hdr->tcp_flags) & 0b10000000;
+			}
+		}
+		#endif
 
 		packet_len = rte_pktmbuf_pkt_len(m);
 
